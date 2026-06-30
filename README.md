@@ -62,7 +62,9 @@ Geo resolution follows this order:
 
 1. Use `location` directly when a KudaGo slug such as `msk` or `spb` is provided.
 2. Try to match `place_query` against KudaGo locations by slug or localized name.
-3. Use Nominatim for `place_query` and pass the resulting `lat`, `lon` and
+   The KudaGo locations dictionary is cached in memory for 15 minutes by default.
+3. Use generic Nominatim search for cities, districts, addresses and landmarks,
+   then pass the resulting `lat`, `lon` and
    `radius` to KudaGo endpoints that support coordinates.
 4. Return an explicit `geo.status` such as `ambiguous_place`,
    `place_not_found` or `unsupported` when the server cannot safely continue.
@@ -304,7 +306,8 @@ Stdio example:
     "NOMINATIM_USER_AGENT": "your-app-name/0.1.0 (your-email-or-url)",
     "NOMINATIM_EMAIL": "your-email@example.com",
     "NOMINATIM_MIN_INTERVAL_SECONDS": "1.0",
-    "NOMINATIM_COUNTRYCODES": "ru"
+    "NOMINATIM_COUNTRYCODES": "ru",
+    "KUDAGO_LOCATIONS_CACHE_TTL": "900"
   },
   "enabled": true
 }
@@ -335,12 +338,13 @@ Environment variables:
 | `KUDAGO_BASE_URL` | `https://kudago.com/public-api/v1.4/` | KudaGo API base URL. |
 | `KUDAGO_LANG` | `ru` | Default KudaGo response language. |
 | `NOMINATIM_BASE_URL` | `https://nominatim.openstreetmap.org/` | Nominatim-compatible API base URL. |
-| `NOMINATIM_USER_AGENT` | `nominatim-geo-client/0.1.0` | Application User-Agent sent to Nominatim. Set a real contact value. |
+| `NOMINATIM_USER_AGENT` | `kudago-nominatim-mcp/0.1.0` | Application User-Agent sent to Nominatim. Set a real contact value. |
 | `NOMINATIM_REFERER` | empty | Optional Referer header for Nominatim. |
 | `NOMINATIM_EMAIL` | empty | Optional email parameter passed to Nominatim search. |
 | `NOMINATIM_MIN_INTERVAL_SECONDS` | `1.0` | Local delay between Nominatim requests. |
 | `NOMINATIM_COUNTRYCODES` | `ru` | Default country filter for geocoding. |
 | `DEFAULT_RADIUS` | `50000` | Fallback radius in meters for coordinate searches. |
+| `KUDAGO_LOCATIONS_CACHE_TTL` | `900` | In-memory KudaGo locations cache lifetime in seconds; use `0` to disable. |
 | `TRUST_ENV` | `true` | Whether HTTP clients trust proxy environment variables. |
 | `LOG_DIR` | `logging` | Directory for log files. |
 | `DEBUG` | `0` | Enables debug logging when truthy. |

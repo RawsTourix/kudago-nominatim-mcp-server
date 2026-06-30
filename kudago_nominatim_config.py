@@ -23,6 +23,7 @@ class Settings:
     default_lang: str = "ru"
     default_countrycodes: str = "ru"
     default_radius: int = 50_000
+    kudago_locations_cache_ttl: float = 900.0
     log_dir: str = "logging"
     trust_env: bool = True
 
@@ -58,6 +59,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         default_lang=os.getenv("KUDAGO_LANG", DEFAULT_SETTINGS.default_lang),
         default_countrycodes=os.getenv("NOMINATIM_COUNTRYCODES", DEFAULT_SETTINGS.default_countrycodes),
         default_radius=int(os.getenv("DEFAULT_RADIUS", str(DEFAULT_SETTINGS.default_radius))),
+        kudago_locations_cache_ttl=float(os.getenv("KUDAGO_LOCATIONS_CACHE_TTL", str(DEFAULT_SETTINGS.kudago_locations_cache_ttl))),
         log_dir=os.getenv("LOG_DIR", DEFAULT_SETTINGS.log_dir),
         trust_env=bool_env("TRUST_ENV", DEFAULT_SETTINGS.trust_env),
         mcp_transport=os.getenv("MCP_TRANSPORT", DEFAULT_SETTINGS.mcp_transport),

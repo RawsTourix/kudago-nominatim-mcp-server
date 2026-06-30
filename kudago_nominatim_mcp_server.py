@@ -14,7 +14,7 @@ from mcp.server.fastmcp import FastMCP
 import kudago_mcp_client as kudago
 from kudago_mcp_client import KudaGoHttpClient
 from nominatim_geo_client import NominatimHttpClient
-from nominatim_geo_client import search_settlement as nominatim_search_settlement
+from nominatim_geo_client import search as nominatim_search
 
 from kudago_nominatim_config import Settings, bool_env, load_settings
 from kudago_nominatim_geo import resolve_geo_for_kudago
@@ -74,6 +74,7 @@ async def _resolve_geo(
         countrycodes=settings.default_countrycodes,
         default_radius=settings.default_radius,
         email=settings.nominatim_email,
+        locations_cache_ttl=settings.kudago_locations_cache_ttl,
     )
     geo = resolved.as_dict()
     if resolved.status != "ok":
@@ -127,7 +128,7 @@ async def resolve_place(query: str, countrycodes: str | None = None, limit: int 
     if not query:
         return status_error("resolve_place", "query must not be empty")
     try:
-        data = await nominatim_search_settlement(
+        data = await nominatim_search(
             nominatim_client,
             q=query,
             countrycodes=clean_optional_text(countrycodes) or settings.default_countrycodes,

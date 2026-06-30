@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
+from weakref import WeakKeyDictionary
 
 from kudago_mcp_client import KudaGoHttpClient
 from kudago_mcp_client import locations as kudago_locations
-from nominatim_geo_client import NominatimHttpClient, search_settlement
+from nominatim_geo_client import NominatimHttpClient, search
 
 from kudago_nominatim_utils import first_list_items, normalize_text
 
@@ -18,6 +21,9 @@ GeoStatus = Literal[
     "unsupported",
     "geocoding_error",
 ]
+
+_locations_cache: WeakKeyDictionary[KudaGoHttpClient, dict[str, tuple[float, list[dict[str, Any]]]]] = WeakKeyDictionary()
+_locations_locks: WeakKeyDictionary[KudaGoHttpClient, asyncio.Lock] = WeakKeyDictionary()
 
 
 @dataclass(slots=True)
@@ -67,13 +73,43 @@ def _candidate_radius(candidate: dict[str, Any], default_radius: int) -> int:
     return default_radius
 
 
-async def find_kudago_location(client: KudaGoHttpClient, query: str, *, lang: str = "ru") -> dict[str, Any] | None:
+async def _get_kudago_locations(
+    client: KudaGoHttpClient,
+    *,
+    lang: str,
+    cache_ttl: float,
+) -> list[dict[str, Any]]:
+    now = time.monotonic()
+    cached = _locations_cache.get(client, {}).get(lang)
+    if cached is not None and now - cached[0] < cache_ttl:
+        return cached[1]
+
+    lock = _locations_locks.setdefault(client, asyncio.Lock())
+    async with lock:
+        now = time.monotonic()
+        cached = _locations_cache.get(client, {}).get(lang)
+        if cached is not None and now - cached[0] < cache_ttl:
+            return cached[1]
+
+        data = await kudago_locations(client, lang=lang, fields=["slug", "name", "timezone", "coords"])
+        locations = [item for item in first_list_items(data, limit=10_000) if isinstance(item, dict)]
+        if cache_ttl > 0:
+            _locations_cache.setdefault(client, {})[lang] = (now, locations)
+        return locations
+
+
+async def find_kudago_location(
+    client: KudaGoHttpClient,
+    query: str,
+    *,
+    lang: str = "ru",
+    cache_ttl: float = 900.0,
+) -> dict[str, Any] | None:
     """Find an exact KudaGo location by slug or localized name."""
     needle = normalize_text(query)
     if not needle:
         return None
-    data = await kudago_locations(client, lang=lang, fields=["slug", "name", "timezone", "coords"])
-    for item in first_list_items(data, limit=10_000):
+    for item in await _get_kudago_locations(client, lang=lang, cache_ttl=max(0.0, cache_ttl)):
         slug = str(item.get("slug") or "")
         name = str(item.get("name") or "")
         if normalize_text(slug) == needle or normalize_text(name) == needle:
@@ -96,6 +132,7 @@ async def resolve_geo_for_kudago(
     default_radius: int = 50_000,
     geocode_limit: int = 5,
     email: str | None = None,
+    locations_cache_ttl: float = 900.0,
 ) -> ResolvedGeo:
     """Resolve tool-level geo arguments into KudaGo location or coordinates."""
     if location:
@@ -115,7 +152,7 @@ async def resolve_geo_for_kudago(
     if not place_query:
         return ResolvedGeo(status="ok", kind="none")
 
-    matched = await find_kudago_location(kudago_client, place_query, lang=lang)
+    matched = await find_kudago_location(kudago_client, place_query, lang=lang, cache_ttl=locations_cache_ttl)
     if matched is not None:
         return ResolvedGeo(status="ok", kind="kudago_location", location=str(matched.get("slug")), matched_location=matched)
 
@@ -123,7 +160,7 @@ async def resolve_geo_for_kudago(
         return ResolvedGeo(status="unsupported", message="KudaGo location was not found and this endpoint does not support coordinates.")
 
     try:
-        candidates_raw = await search_settlement(
+        candidates_raw = await search(
             nominatim_client,
             q=place_query,
             countrycodes=countrycodes,

@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from kudago_mcp_client import KudaGoHttpClient
-from kudago_nominatim_geo import resolve_geo_for_kudago
+from kudago_nominatim_geo import find_kudago_location, resolve_geo_for_kudago
 from nominatim_geo_client import NominatimHttpClient
 
 
@@ -29,7 +29,46 @@ async def test_place_query_with_radius_uses_nominatim_not_invalid_coordinates() 
     assert geo.lon == pytest.approx(37.1778)
     assert geo.radius == 15000
     assert seen_nominatim["q"] == "Нахабино"
-    assert seen_nominatim["featureType"] == "settlement"
+    assert "featureType" not in seen_nominatim
+
+
+@pytest.mark.asyncio
+async def test_place_query_uses_generic_nominatim_search_for_landmarks() -> None:
+    seen_nominatim: dict[str, str] = {}
+
+    def kudago_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    def nominatim_handler(request: httpx.Request) -> httpx.Response:
+        seen_nominatim.update(dict(request.url.params))
+        return httpx.Response(200, json=[{"place_id": 1, "display_name": "TRK Shchuka", "lat": "55.8088", "lon": "37.4645"}])
+
+    async with KudaGoHttpClient(transport=httpx.MockTransport(kudago_handler)) as kudago_client:
+        async with NominatimHttpClient(transport=httpx.MockTransport(nominatim_handler), min_interval_seconds=0, user_agent="test-suite/0.1") as nominatim_client:
+            geo = await resolve_geo_for_kudago(kudago_client=kudago_client, nominatim_client=nominatim_client, place_query="TRK Shchuka", countrycodes="ru")
+
+    assert geo.status == "ok"
+    assert geo.kind == "coordinates"
+    assert seen_nominatim["q"] == "TRK Shchuka"
+    assert "featureType" not in seen_nominatim
+
+
+@pytest.mark.asyncio
+async def test_kudago_locations_are_cached_per_client_and_language() -> None:
+    requests = 0
+
+    def kudago_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return httpx.Response(200, json=[{"slug": "msk", "name": "Moscow"}, {"slug": "spb", "name": "Saint Petersburg"}])
+
+    async with KudaGoHttpClient(transport=httpx.MockTransport(kudago_handler)) as kudago_client:
+        first = await find_kudago_location(kudago_client, "Moscow", lang="en", cache_ttl=900)
+        second = await find_kudago_location(kudago_client, "Saint Petersburg", lang="en", cache_ttl=900)
+
+    assert first is not None and first["slug"] == "msk"
+    assert second is not None and second["slug"] == "spb"
+    assert requests == 1
 
 
 @pytest.mark.asyncio
