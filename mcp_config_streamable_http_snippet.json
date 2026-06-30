@@ -1,0 +1,8 @@
+{
+    "name": "kudago_nominatim",
+    "alias": "kudago",
+    "connect_type": "streamable_http",
+    "url": "http://127.0.0.1:8010/mcp/",
+    "headers": {},
+    "enabled": true
+}

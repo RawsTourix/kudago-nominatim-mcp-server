@@ -1,0 +1,17 @@
+[project]
+name = "kudago-nominatim-mcp-transport"
+version = "0.1.0"
+description = "Drop-in KudaGo + Nominatim FastMCP server with stdio and Streamable HTTP transport selector."
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.25",
+    "python-dotenv>=1.0",
+    "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
