@@ -16,7 +16,13 @@ class QueueService:
             _job_id=queue_job_id,
         )
 
-        if job is None:
-            return None
+        return job.job_id if job is not None else None
 
-        return job.job_id
+    async def enqueue_geo_resolve_job(self, job_id: UUID) -> str | None:
+        queue_job_id = f"geo.resolve:{job_id}"
+        job = await self.redis.enqueue_job(
+            "process_geo_resolve_job",
+            str(job_id),
+            _job_id=queue_job_id,
+        )
+        return job.job_id if job is not None else None

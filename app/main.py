@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routers import health, jobs
+from app.api.routers import geo, health, jobs
 from app.core.config import settings
 from app.core.redis import close_arq_pool, create_arq_pool
 
@@ -23,6 +23,7 @@ app = FastAPI(
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
+app.include_router(geo.router, prefix="/api/v1")
 
 
 @app.get("/")
