@@ -3,11 +3,41 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import DbSession
+from app.models.job import Job
+from app.repositories.job_repository import JobRepository
+from app.repositories.result_repository import ResultRepository
+from app.schemas.jobs import (
+    CommandResultResponse,
+    JobCreateRequest,
+    JobCreateResponse,
+    JobEventResponse,
+    JobEventsResponse,
+    JobGetResponse,
+    JobResponse,
+    JobResultsResponse,
+    JobRunResponse,
+)
 from app.services.job_service import JobService
-from app.schemas.jobs import JobCreateRequest, JobCreateResponse, JobGetResponse, JobResponse
 
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+def to_job_response(job: Job) -> JobResponse:
+    return JobResponse(
+        id=job.id,
+        command=job.command,
+        status=job.status,
+        attempts=job.attempts,
+        max_attempts=job.max_attempts,
+        input_payload=job.input_payload,
+        result_payload=job.result_payload,
+        error_type=job.error_type,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+    )
 
 
 @router.post("", response_model=JobCreateResponse)
@@ -30,26 +60,82 @@ async def create_job(payload: JobCreateRequest, session: DbSession):
 
 @router.get("/{job_id}", response_model=JobGetResponse)
 async def get_job(job_id: UUID, session: DbSession):
-    service = JobService(session)
-    job = await service.get_by_id(job_id)
+    repo = JobRepository(session)
+    job = await repo.get_by_id(job_id)
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
     return JobGetResponse(
         status="ok",
-        job=JobResponse(
-            id=job.id,
-            command=job.command,
-            status=job.status,
-            attempts=job.attempts,
-            max_attempts=job.max_attempts,
-            input_payload=job.input_payload,
-            result_payload=job.result_payload,
-            error_type=job.error_type,
-            error_message=job.error_message,
-            created_at=job.created_at,
-            started_at=job.started_at,
-            finished_at=job.finished_at,
-        ),
+        job=to_job_response(job),
+    )
+
+
+@router.post("/{job_id}/run-test", response_model=JobRunResponse)
+async def run_test_job(job_id: UUID, session: DbSession):
+    service = JobService(session)
+    job = await service.run_test_job(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    await session.commit()
+
+    return JobRunResponse(
+        status="ok",
+        job=to_job_response(job),
+    )
+
+
+@router.get("/{job_id}/events", response_model=JobEventsResponse)
+async def get_job_events(job_id: UUID, session: DbSession):
+    repo = JobRepository(session)
+    job = await repo.get_by_id(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    events = await repo.get_events(job_id)
+
+    return JobEventsResponse(
+        status="ok",
+        events=[
+            JobEventResponse(
+                id=event.id,
+                job_id=event.job_id,
+                event_type=event.event_type,
+                message=event.message,
+                data=event.data,
+                created_at=event.created_at,
+            )
+            for event in events
+        ],
+    )
+
+
+@router.get("/{job_id}/results", response_model=JobResultsResponse)
+async def get_job_results(job_id: UUID, session: DbSession):
+    job_repo = JobRepository(session)
+    result_repo = ResultRepository(session)
+    job = await job_repo.get_by_id(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    results = await result_repo.get_by_job_id(job_id)
+
+    return JobResultsResponse(
+        status="ok",
+        results=[
+            CommandResultResponse(
+                id=result.id,
+                job_id=result.job_id,
+                result_type=result.result_type,
+                items=result.items,
+                meta=result.meta,
+                created_at=result.created_at,
+            )
+            for result in results
+        ],
     )

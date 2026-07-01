@@ -1,6 +1,7 @@
 import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.command_result import CommandResult
@@ -27,3 +28,11 @@ class ResultRepository:
         self.session.add(result)
         await self.session.flush()
         return result
+
+    async def get_by_job_id(self, job_id: uuid.UUID) -> list[CommandResult]:
+        result = await self.session.execute(
+            select(CommandResult)
+            .where(CommandResult.job_id == job_id)
+            .order_by(CommandResult.created_at.asc())
+        )
+        return list(result.scalars().all())

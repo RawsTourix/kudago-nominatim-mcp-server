@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.job import Job
 from app.repositories.job_repository import JobRepository
 from app.repositories.request_repository import RequestRepository
+from app.repositories.result_repository import ResultRepository
 
 
 class JobService:
@@ -13,6 +14,7 @@ class JobService:
         self.session = session
         self.request_repo = RequestRepository(session)
         self.job_repo = JobRepository(session)
+        self.result_repo = ResultRepository(session)
 
     async def create_job_from_api_request(
         self,
@@ -50,17 +52,75 @@ class JobService:
         )
 
         return job
-    
+
     async def get_by_id(self, job_id: uuid.UUID) -> Job | None:
         return await self.job_repo.get_by_id(job_id)
-    
+
+    async def run_test_job(self, job_id: uuid.UUID) -> Job | None:
+        job = await self.job_repo.get_by_id(job_id)
+
+        if job is None:
+            return None
+
+        if job.status == "succeeded":
+            return job
+
+        await self.job_repo.mark_running(job)
+
+        await self.job_repo.add_event(
+            job_id=job.id,
+            event_type="started",
+            message="Test job execution started",
+            data={
+                "command": job.command,
+                "attempts": job.attempts,
+            },
+        )
+
+        result_payload: dict[str, Any] = {
+            "status": "ok",
+            "command": job.command,
+            "echo": job.input_payload,
+            "message": "Test job executed successfully",
+        }
+
+        await self.result_repo.create(
+            job_id=job.id,
+            result_type="test",
+            items=[
+                {
+                    "command": job.command,
+                    "input": job.input_payload,
+                    "output": result_payload,
+                }
+            ],
+            meta={
+                "source": "run_test_job",
+                "items_count": 1,
+            },
+        )
+
+        await self.job_repo.mark_succeeded(
+            job,
+            result_payload=result_payload,
+        )
+
+        await self.job_repo.add_event(
+            job_id=job.id,
+            event_type="completed",
+            message="Test job execution completed",
+            data={"status": job.status},
+        )
+
+        return job
+
     async def get_job_from_api_request(
         self,
         *,
         api_request_id: uuid.UUID,
     ) -> Job | None:
         return await self.job_repo.get_by_api_request_id(api_request_id)
-        
+
     async def get_job_by_client_request_id(
         self,
         *,

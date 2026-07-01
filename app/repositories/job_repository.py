@@ -39,7 +39,7 @@ class JobRepository:
             select(Job).where(Job.id == job_id)
         )
         return result.scalar_one_or_none()
-    
+
     async def get_by_api_request_id(
         self,
         *,
@@ -89,3 +89,11 @@ class JobRepository:
         self.session.add(event)
         await self.session.flush()
         return event
+
+    async def get_events(self, job_id: uuid.UUID) -> list[JobEvent]:
+        result = await self.session.execute(
+            select(JobEvent)
+            .where(JobEvent.job_id == job_id)
+            .order_by(JobEvent.created_at.asc())
+        )
+        return list(result.scalars().all())
