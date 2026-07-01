@@ -1,15 +1,20 @@
 from app.core.redis import get_redis_settings
-from app.workers.tasks import process_geo_resolve_job, process_test_job
+from app.workers.tasks import (
+    process_events_search_job,
+    process_geo_resolve_job,
+    process_test_job,
+)
 
 
 class WorkerSettings:
     functions = [
         process_test_job,
         process_geo_resolve_job,
+        process_events_search_job,
     ]
 
     redis_settings = get_redis_settings()
 
     max_jobs = 10
-    job_timeout = 60
+    job_timeout = 120
     keep_result = 3600

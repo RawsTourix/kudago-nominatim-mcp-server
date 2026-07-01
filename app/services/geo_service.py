@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.integrations.nominatim import NominatimHttpClient, search
 from app.repositories.geo_cache_repository import GeoCacheRepository
 from app.repositories.upstream_call_repository import UpstreamCallRepository
@@ -56,8 +57,8 @@ class GeoService:
             "accept_language": accept_language,
         }
         client = NominatimHttpClient(
-            user_agent="kudago-fastapi-service/0.1.0",
-            min_interval_seconds=1.0,
+            user_agent=settings.nominatim_user_agent,
+            min_interval_seconds=settings.nominatim_min_interval_seconds,
             trust_env=True,
         )
 
@@ -96,7 +97,7 @@ class GeoService:
                 status = "ok"
                 selected_lat = float(candidates[0]["lat"])
                 selected_lon = float(candidates[0]["lon"])
-                radius = 50_000
+                radius = settings.default_radius
             else:
                 status = "ambiguous"
                 selected_lat = None
