@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.job import Job
+from app.models.job_event import JobEvent
 
 
 def utc_now() -> datetime:
@@ -21,8 +22,10 @@ class JobRepository:
         *,
         command: str,
         input_payload: dict[str, Any],
+        api_request_id: uuid.UUID | None = None,
     ) -> Job:
         job = Job(
+            api_request_id=api_request_id,
             command=command,
             status="queued",
             input_payload=input_payload,
@@ -34,6 +37,16 @@ class JobRepository:
     async def get_by_id(self, job_id: uuid.UUID) -> Job | None:
         result = await self.session.execute(
             select(Job).where(Job.id == job_id)
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_by_api_request_id(
+        self,
+        *,
+        api_request_id: uuid.UUID | None = None,
+    ) -> Job | None:
+        result = await self.session.execute(
+            select(Job).where(Job.api_request_id == api_request_id)
         )
         return result.scalar_one_or_none()
 
@@ -58,3 +71,21 @@ class JobRepository:
         job.finished_at = utc_now()
         await self.session.flush()
         return job
+    
+    async def add_event(
+        self,
+        *,
+        job_id: uuid.UUID,
+        event_type: str,
+        message: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> JobEvent:
+        event = JobEvent(
+            job_id=job_id,
+            event_type=event_type,
+            message=message,
+            data=data,
+        )
+        self.session.add(event)
+        await self.session.flush()
+        return event

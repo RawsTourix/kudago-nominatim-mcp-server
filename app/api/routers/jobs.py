@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import DbSession
-from app.repositories.job_repository import JobRepository
+from app.services.job_service import JobService
 from app.schemas.jobs import JobCreateRequest, JobCreateResponse, JobGetResponse, JobResponse
 
 
@@ -12,9 +12,11 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 @router.post("", response_model=JobCreateResponse)
 async def create_job(payload: JobCreateRequest, session: DbSession):
-    repo = JobRepository(session)
+    service = JobService(session)
 
-    job = await repo.create(
+    job = await service.create_job_from_api_request(
+        endpoint="/api/v1/jobs",
+        method="POST",
         command=payload.command,
         input_payload=payload.input_payload,
     )
@@ -26,11 +28,10 @@ async def create_job(payload: JobCreateRequest, session: DbSession):
         job_id=job.id,
     )
 
-
 @router.get("/{job_id}", response_model=JobGetResponse)
 async def get_job(job_id: UUID, session: DbSession):
-    repo = JobRepository(session)
-    job = await repo.get_by_id(job_id)
+    service = JobService(session)
+    job = await service.get_by_id(job_id)
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
