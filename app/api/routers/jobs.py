@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 
-from app.api.deps import DbSession
+from app.api.deps import ArqPool, DbSession
 from app.models.job import Job
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
@@ -16,8 +16,10 @@ from app.schemas.jobs import (
     JobResponse,
     JobResultsResponse,
     JobRunResponse,
+    JobEnqueueResponse,
 )
 from app.services.job_service import JobService
+from app.services.queue_service import QueueService
 
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -138,4 +140,39 @@ async def get_job_results(job_id: UUID, session: DbSession):
             )
             for result in results
         ],
+    )
+
+
+@router.post("/{job_id}/enqueue-test", response_model=JobEnqueueResponse)
+async def enqueue_test_job(job_id: UUID, session: DbSession, redis: ArqPool):
+    job_repo = JobRepository(session)
+    job = await job_repo.get_by_id(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status == "succeeded":
+        return JobEnqueueResponse(
+            status="ok",
+            job_id=job.id,
+            queue_job_id=job.queue_job_id,
+            enqueued=False,
+        )
+
+    queue_service = QueueService(redis)
+    queue_job_id = await queue_service.enqueue_test_job(job_id)
+
+    service = JobService(session)
+    job = await service.mark_enqueued(
+        job_id=job_id,
+        queue_job_id=queue_job_id,
+    )
+
+    await session.commit()
+
+    return JobEnqueueResponse(
+        status="ok",
+        job_id=job_id,
+        queue_job_id=queue_job_id,
+        enqueued=queue_job_id is not None,
     )

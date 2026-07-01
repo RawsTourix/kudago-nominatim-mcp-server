@@ -1,10 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.api.routers import health, jobs
 from app.core.config import settings
+from app.core.redis import close_arq_pool, create_arq_pool
 
 
-app = FastAPI(title=settings.app_name)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.arq_redis = await create_arq_pool()
+    try:
+        yield
+    finally:
+        await close_arq_pool(app.state.arq_redis)
+
+
+app = FastAPI(
+    title=settings.app_name,
+    lifespan=lifespan,
+)
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")

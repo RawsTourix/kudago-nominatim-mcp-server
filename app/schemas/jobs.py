@@ -66,3 +66,10 @@ class CommandResultResponse(BaseModel):
 class JobResultsResponse(BaseModel):
     status: str
     results: list[CommandResultResponse]
+
+
+class JobEnqueueResponse(BaseModel):
+    status: str
+    job_id: UUID
+    queue_job_id: str | None
+    enqueued: bool

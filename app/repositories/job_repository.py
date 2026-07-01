@@ -97,3 +97,8 @@ class JobRepository:
             .order_by(JobEvent.created_at.asc())
         )
         return list(result.scalars().all())
+
+    async def set_queue_job_id(self, job: Job, queue_job_id: str | None) -> Job:
+        job.queue_job_id = queue_job_id
+        await self.session.flush()
+        return job

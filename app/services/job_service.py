@@ -134,3 +134,27 @@ class JobService:
             return None
 
         return await self.job_repo.get_by_api_request_id(api_request.id)
+
+    async def mark_enqueued(
+        self,
+        *,
+        job_id,
+        queue_job_id: str | None,
+    ) -> Job | None:
+        job = await self.job_repo.get_by_id(job_id)
+
+        if job is None:
+            return None
+
+        await self.job_repo.set_queue_job_id(job, queue_job_id)
+
+        await self.job_repo.add_event(
+            job_id=job.id,
+            event_type="enqueued",
+            message="Job enqueued to Redis",
+            data={
+                "queue_job_id": queue_job_id,
+            },
+        )
+
+        return job
