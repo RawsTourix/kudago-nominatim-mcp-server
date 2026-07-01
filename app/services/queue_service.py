@@ -35,3 +35,12 @@ class QueueService:
             _job_id=queue_job_id,
         )
         return job.job_id if job is not None else None
+
+    async def enqueue_places_search_job(self, job_id: UUID) -> str | None:
+        queue_job_id = f"places.search:{job_id}"
+        job = await self.redis.enqueue_job(
+            "process_places_search_job",
+            str(job_id),
+            _job_id=queue_job_id,
+        )
+        return job.job_id if job is not None else None

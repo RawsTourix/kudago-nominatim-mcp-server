@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 
-class EventsSearchRequest(BaseModel):
+class PlacesSearchRequest(BaseModel):
     location: str | None = Field(default=None, max_length=100)
     place_query: str | None = Field(default=None, max_length=500)
 
@@ -12,13 +12,12 @@ class EventsSearchRequest(BaseModel):
     lon: float | None = None
     radius: int | None = Field(default=None, ge=100, le=100_000)
 
-    actual_since: str | int | None = None
-    actual_until: str | int | None = None
-    include_past: bool = False
-
     categories: str | None = None
     tags: str | None = None
-    is_free: bool | None = None
+
+    has_showings: bool | None = None
+    showing_since: str | int | None = None
+    showing_until: str | int | None = None
 
     page: int = Field(default=1, ge=1, le=10_000)
     page_size: int = Field(default=10, ge=1, le=100)
@@ -38,15 +37,32 @@ class EventsSearchRequest(BaseModel):
 
         return self
 
+    @model_validator(mode="after")
+    def validate_showing_window(self):
+        has_since = self.showing_since is not None
+        has_until = self.showing_until is not None
 
-class EventsSearchQueuedResponse(BaseModel):
+        if has_since != has_until:
+            raise ValueError(
+                "showing_since and showing_until must be provided together"
+            )
+
+        if (has_since or has_until) and self.has_showings is not True:
+            raise ValueError(
+                "showing_since/showing_until require has_showings=true"
+            )
+
+        return self
+
+
+class PlacesSearchQueuedResponse(BaseModel):
     status: str
     job_id: UUID
     queue_job_id: str | None
     enqueued: bool
 
 
-class EventsSearchResultMeta(BaseModel):
+class PlacesSearchResultMeta(BaseModel):
     status: str
     source: str
     geo: dict[str, Any] | None = None

@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -25,7 +26,35 @@ from app.services.queue_service import QueueService
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-def to_job_response(job: Job) -> JobResponse:
+def compact_result_payload(
+    payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+
+    if not isinstance(payload, dict):
+        return payload
+
+    if "items" not in payload or not isinstance(payload["items"], list):
+        return payload
+
+    compact = dict(payload)
+    items = compact.pop("items")
+    compact["items_hidden"] = True
+    compact["items_count"] = len(items)
+    compact["items_hint"] = (
+        "Use /api/v1/jobs/{job_id}/results to fetch stored result items."
+    )
+    return compact
+
+
+def to_job_response(job: Job, *, include_result: bool = False) -> JobResponse:
+    result_payload = (
+        job.result_payload
+        if include_result
+        else compact_result_payload(job.result_payload)
+    )
+
     return JobResponse(
         id=job.id,
         command=job.command,
@@ -33,7 +62,7 @@ def to_job_response(job: Job) -> JobResponse:
         attempts=job.attempts,
         max_attempts=job.max_attempts,
         input_payload=job.input_payload,
-        result_payload=job.result_payload,
+        result_payload=result_payload,
         error_type=job.error_type,
         error_message=job.error_message,
         created_at=job.created_at,
@@ -61,7 +90,11 @@ async def create_job(payload: JobCreateRequest, session: DbSession):
     )
 
 @router.get("/{job_id}", response_model=JobGetResponse)
-async def get_job(job_id: UUID, session: DbSession):
+async def get_job(
+    job_id: UUID,
+    session: DbSession,
+    include_result: bool = False,
+):
     repo = JobRepository(session)
     job = await repo.get_by_id(job_id)
 
@@ -70,7 +103,7 @@ async def get_job(job_id: UUID, session: DbSession):
 
     return JobGetResponse(
         status="ok",
-        job=to_job_response(job),
+        job=to_job_response(job, include_result=include_result),
     )
 
 
