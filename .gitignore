@@ -1,0 +1,49 @@
+# Виртуальные окружения
+.venv/
+venv/
+env/
+ENV/
+
+# Переменные окружения и локальные секреты
+.env
+.env.*
+!.env.example
+
+# Кеш и скомпилированные файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Результаты сборки и метаданные пакетов
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Кеши тестов, линтеров и анализаторов типов
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Отчёты о покрытии тестами
+.coverage
+.coverage.*
+htmlcov/
+
+# Файлы журналов
+*.log
+logs/
+logging/
+
+# Настройки редакторов и локальных инструментов
+.idea/
+.vscode/
+.agents/
+.codex/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+Desktop.ini
