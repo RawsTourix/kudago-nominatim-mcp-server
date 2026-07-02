@@ -1,6 +1,7 @@
 import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.upstream_call import UpstreamCall
@@ -41,3 +42,11 @@ class UpstreamCallRepository:
         self.session.add(call)
         await self.session.flush()
         return call
+
+    async def get_by_job_id(self, job_id: uuid.UUID) -> list[UpstreamCall]:
+        result = await self.session.execute(
+            select(UpstreamCall)
+            .where(UpstreamCall.job_id == job_id)
+            .order_by(UpstreamCall.created_at.asc())
+        )
+        return list(result.scalars().all())

@@ -68,6 +68,27 @@ class JobResultsResponse(BaseModel):
     results: list[CommandResultResponse]
 
 
+class UpstreamCallResponse(BaseModel):
+    id: UUID
+    job_id: UUID
+    provider: str
+    operation: str
+    url_path: str | None
+    request_payload: dict[str, Any] | None
+    response_payload: dict[str, Any] | list[Any] | None
+    response_status_code: int | None
+    duration_ms: int | None
+    success: bool
+    error_type: str | None
+    error_message: str | None
+    created_at: datetime
+
+
+class JobUpstreamCallsResponse(BaseModel):
+    status: str
+    upstream_calls: list[UpstreamCallResponse]
+
+
 class JobEnqueueResponse(BaseModel):
     status: str
     job_id: UUID

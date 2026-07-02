@@ -7,6 +7,7 @@ from app.api.deps import ArqPool, DbSession
 from app.models.job import Job
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
+from app.repositories.upstream_call_repository import UpstreamCallRepository
 from app.schemas.jobs import (
     CommandResultResponse,
     JobCreateRequest,
@@ -18,6 +19,8 @@ from app.schemas.jobs import (
     JobResultsResponse,
     JobRunResponse,
     JobEnqueueResponse,
+    JobUpstreamCallsResponse,
+    UpstreamCallResponse,
 )
 from app.services.job_service import JobService
 from app.services.queue_service import QueueService
@@ -172,6 +175,40 @@ async def get_job_results(job_id: UUID, session: DbSession):
                 created_at=result.created_at,
             )
             for result in results
+        ],
+    )
+
+
+@router.get("/{job_id}/upstream-calls", response_model=JobUpstreamCallsResponse)
+async def get_job_upstream_calls(job_id: UUID, session: DbSession):
+    job_repo = JobRepository(session)
+    upstream_repo = UpstreamCallRepository(session)
+    job = await job_repo.get_by_id(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    calls = await upstream_repo.get_by_job_id(job_id)
+
+    return JobUpstreamCallsResponse(
+        status="ok",
+        upstream_calls=[
+            UpstreamCallResponse(
+                id=call.id,
+                job_id=call.job_id,
+                provider=call.provider,
+                operation=call.operation,
+                url_path=call.url_path,
+                request_payload=call.request_payload,
+                response_payload=call.response_payload,
+                response_status_code=call.response_status_code,
+                duration_ms=call.duration_ms,
+                success=call.success,
+                error_type=call.error_type,
+                error_message=call.error_message,
+                created_at=call.created_at,
+            )
+            for call in calls
         ],
     )
 
