@@ -2,7 +2,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routers import events, geo, health, jobs, objects, places, references
+from app.api.routers import (
+    events,
+    geo,
+    health,
+    jobs,
+    movie_showings,
+    objects,
+    places,
+    references,
+)
 from app.core.config import settings
 from app.core.redis import close_arq_pool, create_arq_pool
 
@@ -28,6 +37,7 @@ app.include_router(events.router, prefix="/api/v1")
 app.include_router(places.router, prefix="/api/v1")
 app.include_router(references.router, prefix="/api/v1")
 app.include_router(objects.router, prefix="/api/v1")
+app.include_router(movie_showings.router, prefix="/api/v1")
 
 
 @app.get("/")

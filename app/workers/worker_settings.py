@@ -2,6 +2,7 @@ from app.core.redis import get_redis_settings
 from app.workers.tasks import (
     process_events_search_job,
     process_geo_resolve_job,
+    process_movie_showings_search_job,
     process_places_search_job,
     process_test_job,
 )
@@ -13,6 +14,7 @@ class WorkerSettings:
         process_geo_resolve_job,
         process_events_search_job,
         process_places_search_job,
+        process_movie_showings_search_job,
     ]
 
     redis_settings = get_redis_settings()
