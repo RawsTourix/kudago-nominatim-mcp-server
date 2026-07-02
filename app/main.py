@@ -9,6 +9,7 @@ from app.api.routers import (
     jobs,
     movie_showings,
     movies,
+    news,
     objects,
     places,
     references,
@@ -40,6 +41,7 @@ app.include_router(references.router, prefix="/api/v1")
 app.include_router(objects.router, prefix="/api/v1")
 app.include_router(movie_showings.router, prefix="/api/v1")
 app.include_router(movies.router, prefix="/api/v1")
+app.include_router(news.router, prefix="/api/v1")
 
 
 @app.get("/")

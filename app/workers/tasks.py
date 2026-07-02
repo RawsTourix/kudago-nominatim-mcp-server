@@ -11,6 +11,7 @@ from app.services.job_service import JobService
 from app.services.location_resolver_service import LocationResolverService
 from app.services.movie_showings_service import MovieShowingsService
 from app.services.movies_service import MoviesService
+from app.services.news_service import NewsService
 from app.services.places_service import PlacesService
 
 
@@ -895,6 +896,173 @@ async def process_movies_search_job(ctx, job_id: str) -> dict:
                 job_id=job.id,
                 event_type="failed",
                 message="Movies search job failed",
+                data={
+                    "error_type": exc.__class__.__name__,
+                    "error_message": str(exc),
+                },
+            )
+            await session.commit()
+            raise
+
+
+async def process_news_search_job(ctx, job_id: str) -> dict:
+    parsed_job_id = UUID(job_id)
+
+    async with AsyncSessionLocal() as session:
+        job_repo = JobRepository(session)
+        result_repo = ResultRepository(session)
+        resolver = LocationResolverService(session)
+        news_service = NewsService(session)
+        job = await job_repo.get_by_id(parsed_job_id)
+
+        if job is None:
+            return {
+                "status": "error",
+                "message": "Job not found",
+                "job_id": job_id,
+            }
+
+        if job.status == "succeeded":
+            return {
+                "status": "ok",
+                "message": "Job already succeeded",
+                "job_id": job_id,
+            }
+
+        try:
+            await job_repo.mark_running(job)
+            await job_repo.add_event(
+                job_id=job.id,
+                event_type="started",
+                message="News search job started",
+                data={"command": job.command},
+            )
+
+            payload = job.input_payload
+            lang = payload.get("lang") or settings.kudago_lang
+            resolved = await resolver.resolve_for_kudago_location_or_coordinates(
+                job_id=job.id,
+                place_query=payload.get("place_query"),
+                location=payload.get("location"),
+                lat=None,
+                lon=None,
+                radius=None,
+                lang=lang,
+                allow_coordinates=False,
+            )
+
+            if resolved["status"] != "ok":
+                status = resolved["status"]
+                if status == "geo_ambiguous":
+                    message = (
+                        "Geo resolution is ambiguous; specify a KudaGo location slug."
+                    )
+                elif status == "geo_not_found":
+                    message = (
+                        "Geo resolution did not find a matching place; specify a "
+                        "KudaGo location slug."
+                    )
+                else:
+                    message = "KudaGo news endpoint requires a KudaGo location slug."
+
+                result_payload = {
+                    "status": status,
+                    "message": message,
+                    "geo": resolved["geo"],
+                    "items": [],
+                    "count": 0,
+                    "returned": 0,
+                }
+                await result_repo.create(
+                    job_id=job.id,
+                    result_type="news.search",
+                    items=[],
+                    meta={"status": status, "geo": resolved["geo"]},
+                )
+                await job_repo.mark_succeeded(job, result_payload=result_payload)
+                await job_repo.add_event(
+                    job_id=job.id,
+                    event_type="completed",
+                    message=(
+                        "News search completed without KudaGo call because location "
+                        "was not resolved"
+                    ),
+                    data={"status": status},
+                )
+                await session.commit()
+                return {
+                    "status": "ok",
+                    "job_id": job_id,
+                    "result_status": status,
+                }
+
+            location = resolved["location"]
+            geo_meta = resolved["geo"]
+            search_result = await news_service.search_news(
+                job_id=job.id,
+                location=location,
+                tags=payload.get("tags"),
+                actual_only=payload.get("actual_only"),
+                page=payload.get("page", 1),
+                page_size=payload.get("page_size", 10),
+                lang=lang,
+            )
+            items = search_result["items"]
+            filters = {
+                "location": location,
+                "place_query": payload.get("place_query"),
+                "tags": payload.get("tags"),
+                "actual_only": payload.get("actual_only"),
+            }
+            result_payload = {
+                "status": "ok",
+                "source": "kudago",
+                "geo": geo_meta,
+                "filters": filters,
+                "count": search_result.get("count"),
+                "returned": search_result.get("returned"),
+                "items": items,
+            }
+            await result_repo.create(
+                job_id=job.id,
+                result_type="news.search",
+                items=items,
+                meta={
+                    "status": "ok",
+                    "source": "kudago",
+                    "geo": geo_meta,
+                    "filters": filters,
+                    "count": search_result.get("count"),
+                    "returned": search_result.get("returned"),
+                },
+            )
+            await job_repo.mark_succeeded(job, result_payload=result_payload)
+            await job_repo.add_event(
+                job_id=job.id,
+                event_type="completed",
+                message="News search job completed",
+                data={
+                    "status": "ok",
+                    "returned": search_result.get("returned"),
+                    "count": search_result.get("count"),
+                },
+            )
+            await session.commit()
+            return {
+                "status": "ok",
+                "job_id": job_id,
+                "returned": search_result.get("returned"),
+            }
+        except Exception as exc:
+            await job_repo.mark_failed(
+                job,
+                error_type=exc.__class__.__name__,
+                error_message=str(exc),
+            )
+            await job_repo.add_event(
+                job_id=job.id,
+                event_type="failed",
+                message="News search job failed",
                 data={
                     "error_type": exc.__class__.__name__,
                     "error_message": str(exc),
