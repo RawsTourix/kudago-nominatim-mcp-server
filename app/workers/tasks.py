@@ -8,6 +8,7 @@ from app.repositories.result_repository import ResultRepository
 from app.services.events_service import EventsService
 from app.services.geo_service import GeoService
 from app.services.job_service import JobService
+from app.services.location_resolver_service import LocationResolverService
 from app.services.movie_showings_service import MovieShowingsService
 from app.services.movies_service import MoviesService
 from app.services.places_service import PlacesService
@@ -165,7 +166,7 @@ async def process_events_search_job(ctx, job_id: str) -> dict:
         job_repo = JobRepository(session)
         result_repo = ResultRepository(session)
         events_service = EventsService(session)
-        geo_service = GeoService(session)
+        location_resolver = LocationResolverService(session)
         job = await job_repo.get_by_id(parsed_job_id)
 
         if job is None:
@@ -189,104 +190,51 @@ async def process_events_search_job(ctx, job_id: str) -> dict:
 
             payload = job.input_payload
             lang = payload.get("lang") or settings.kudago_lang
-            geo_meta: dict | None = None
-            location = payload.get("location")
-            lat = payload.get("lat")
-            lon = payload.get("lon")
-            radius = payload.get("radius")
             place_query = payload.get("place_query")
+            resolved = await location_resolver.resolve_for_kudago_location_or_coordinates(
+                job_id=job.id,
+                place_query=place_query,
+                location=payload.get("location"),
+                lat=payload.get("lat"),
+                lon=payload.get("lon"),
+                radius=payload.get("radius"),
+                lang=lang,
+                allow_coordinates=True,
+            )
+            location = resolved["location"]
+            lat = resolved["lat"]
+            lon = resolved["lon"]
+            radius = resolved["radius"]
+            geo_meta = resolved["geo"]
 
-            if place_query and not location and lat is None:
-                matched_location = await events_service.find_kudago_location(
-                    job_id=job.id,
-                    place_query=place_query,
-                    lang=lang,
-                )
-
-                if matched_location is not None:
-                    location = matched_location.get("slug")
-                    geo_meta = {
-                        "status": "ok",
-                        "kind": "kudago_location",
-                        "location": location,
-                        "matched_location": matched_location,
-                    }
-                else:
-                    geo_result = await geo_service.resolve_place(
-                        job_id=job.id,
-                        query=place_query,
-                        countrycodes=settings.nominatim_countrycodes,
-                        limit=5,
-                        accept_language=lang,
-                    )
-                    geo_meta = {
-                        "status": geo_result["status"],
-                        "kind": (
-                            "coordinates" if geo_result["status"] == "ok" else "none"
-                        ),
-                        "source": geo_result["source"],
-                        "query": place_query,
-                        "candidates": geo_result.get("candidates", []),
-                        "selected_lat": geo_result.get("selected_lat"),
-                        "selected_lon": geo_result.get("selected_lon"),
-                        "radius": geo_result.get("radius"),
-                    }
-
-                    if geo_result["status"] != "ok":
-                        result_status = (
-                            "geo_ambiguous"
-                            if geo_result["status"] == "ambiguous"
-                            else "geo_not_found"
-                        )
-                        result_payload = {
-                            "status": result_status,
-                            "message": (
-                                "Geo resolution did not produce a single coordinate result"
-                            ),
-                            "geo": geo_meta,
-                            "items": [],
-                            "count": 0,
-                            "returned": 0,
-                        }
-                        await result_repo.create(
-                            job_id=job.id,
-                            result_type="events.search",
-                            items=[],
-                            meta={"status": result_status, "geo": geo_meta},
-                        )
-                        await job_repo.mark_succeeded(job, result_payload=result_payload)
-                        await job_repo.add_event(
-                            job_id=job.id,
-                            event_type="completed",
-                            message=(
-                                "Events search completed without KudaGo call because "
-                                "geo is ambiguous or not found"
-                            ),
-                            data={"status": result_status},
-                        )
-                        await session.commit()
-                        return {
-                            "status": "ok",
-                            "job_id": job_id,
-                            "result_status": result_status,
-                        }
-
-                    lat = geo_result["selected_lat"]
-                    lon = geo_result["selected_lon"]
-                    radius = geo_result["radius"] or settings.default_radius
-            elif location:
-                geo_meta = {
-                    "status": "ok",
-                    "kind": "kudago_location",
-                    "location": location,
+            if resolved["status"] != "ok":
+                result_status = resolved["status"]
+                result_payload = {
+                    "status": result_status,
+                    "message": "Geo resolution did not produce a usable result",
+                    "geo": geo_meta,
+                    "items": [],
+                    "count": 0,
+                    "returned": 0,
                 }
-            elif lat is not None and lon is not None and radius is not None:
-                geo_meta = {
+                await result_repo.create(
+                    job_id=job.id,
+                    result_type="events.search",
+                    items=[],
+                    meta={"status": result_status, "geo": geo_meta},
+                )
+                await job_repo.mark_succeeded(job, result_payload=result_payload)
+                await job_repo.add_event(
+                    job_id=job.id,
+                    event_type="completed",
+                    message="Events search completed without KudaGo call",
+                    data={"status": result_status},
+                )
+                await session.commit()
+                return {
                     "status": "ok",
-                    "kind": "coordinates",
-                    "lat": lat,
-                    "lon": lon,
-                    "radius": radius,
+                    "job_id": job_id,
+                    "result_status": result_status,
                 }
 
             actual_since = payload.get("actual_since")
@@ -392,8 +340,7 @@ async def process_places_search_job(ctx, job_id: str) -> dict:
     async with AsyncSessionLocal() as session:
         job_repo = JobRepository(session)
         result_repo = ResultRepository(session)
-        events_service = EventsService(session)
-        geo_service = GeoService(session)
+        location_resolver = LocationResolverService(session)
         places_service = PlacesService(session)
         job = await job_repo.get_by_id(parsed_job_id)
 
@@ -418,104 +365,51 @@ async def process_places_search_job(ctx, job_id: str) -> dict:
 
             payload = job.input_payload
             lang = payload.get("lang") or settings.kudago_lang
-            geo_meta: dict | None = None
-            location = payload.get("location")
-            lat = payload.get("lat")
-            lon = payload.get("lon")
-            radius = payload.get("radius")
             place_query = payload.get("place_query")
+            resolved = await location_resolver.resolve_for_kudago_location_or_coordinates(
+                job_id=job.id,
+                place_query=place_query,
+                location=payload.get("location"),
+                lat=payload.get("lat"),
+                lon=payload.get("lon"),
+                radius=payload.get("radius"),
+                lang=lang,
+                allow_coordinates=True,
+            )
+            location = resolved["location"]
+            lat = resolved["lat"]
+            lon = resolved["lon"]
+            radius = resolved["radius"]
+            geo_meta = resolved["geo"]
 
-            if place_query and not location and lat is None:
-                matched_location = await events_service.find_kudago_location(
-                    job_id=job.id,
-                    place_query=place_query,
-                    lang=lang,
-                )
-
-                if matched_location is not None:
-                    location = matched_location.get("slug")
-                    geo_meta = {
-                        "status": "ok",
-                        "kind": "kudago_location",
-                        "location": location,
-                        "matched_location": matched_location,
-                    }
-                else:
-                    geo_result = await geo_service.resolve_place(
-                        job_id=job.id,
-                        query=place_query,
-                        countrycodes=settings.nominatim_countrycodes,
-                        limit=5,
-                        accept_language=lang,
-                    )
-                    geo_meta = {
-                        "status": geo_result["status"],
-                        "kind": (
-                            "coordinates" if geo_result["status"] == "ok" else "none"
-                        ),
-                        "source": geo_result["source"],
-                        "query": place_query,
-                        "candidates": geo_result.get("candidates", []),
-                        "selected_lat": geo_result.get("selected_lat"),
-                        "selected_lon": geo_result.get("selected_lon"),
-                        "radius": geo_result.get("radius"),
-                    }
-
-                    if geo_result["status"] != "ok":
-                        result_status = (
-                            "geo_ambiguous"
-                            if geo_result["status"] == "ambiguous"
-                            else "geo_not_found"
-                        )
-                        result_payload = {
-                            "status": result_status,
-                            "message": (
-                                "Geo resolution did not produce a single coordinate result"
-                            ),
-                            "geo": geo_meta,
-                            "items": [],
-                            "count": 0,
-                            "returned": 0,
-                        }
-                        await result_repo.create(
-                            job_id=job.id,
-                            result_type="places.search",
-                            items=[],
-                            meta={"status": result_status, "geo": geo_meta},
-                        )
-                        await job_repo.mark_succeeded(job, result_payload=result_payload)
-                        await job_repo.add_event(
-                            job_id=job.id,
-                            event_type="completed",
-                            message=(
-                                "Places search completed without KudaGo call because "
-                                "geo is ambiguous or not found"
-                            ),
-                            data={"status": result_status},
-                        )
-                        await session.commit()
-                        return {
-                            "status": "ok",
-                            "job_id": job_id,
-                            "result_status": result_status,
-                        }
-
-                    lat = geo_result["selected_lat"]
-                    lon = geo_result["selected_lon"]
-                    radius = geo_result["radius"] or settings.default_radius
-            elif location:
-                geo_meta = {
-                    "status": "ok",
-                    "kind": "kudago_location",
-                    "location": location,
+            if resolved["status"] != "ok":
+                result_status = resolved["status"]
+                result_payload = {
+                    "status": result_status,
+                    "message": "Geo resolution did not produce a usable result",
+                    "geo": geo_meta,
+                    "items": [],
+                    "count": 0,
+                    "returned": 0,
                 }
-            elif lat is not None and lon is not None and radius is not None:
-                geo_meta = {
+                await result_repo.create(
+                    job_id=job.id,
+                    result_type="places.search",
+                    items=[],
+                    meta={"status": result_status, "geo": geo_meta},
+                )
+                await job_repo.mark_succeeded(job, result_payload=result_payload)
+                await job_repo.add_event(
+                    job_id=job.id,
+                    event_type="completed",
+                    message="Places search completed without KudaGo call",
+                    data={"status": result_status},
+                )
+                await session.commit()
+                return {
                     "status": "ok",
-                    "kind": "coordinates",
-                    "lat": lat,
-                    "lon": lon,
-                    "radius": radius,
+                    "job_id": job_id,
+                    "result_status": result_status,
                 }
 
             showing_since = payload.get("showing_since")
@@ -630,8 +524,7 @@ async def process_movie_showings_search_job(ctx, job_id: str) -> dict:
     async with AsyncSessionLocal() as session:
         job_repo = JobRepository(session)
         result_repo = ResultRepository(session)
-        events_service = EventsService(session)
-        geo_service = GeoService(session)
+        location_resolver = LocationResolverService(session)
         movie_showings_service = MovieShowingsService(session)
         job = await job_repo.get_by_id(parsed_job_id)
 
@@ -660,81 +553,63 @@ async def process_movie_showings_search_job(ctx, job_id: str) -> dict:
 
             payload = job.input_payload
             lang = payload.get("lang") or settings.kudago_lang
-            location = payload.get("location")
             place_query = payload.get("place_query")
-            geo_meta: dict | None = None
+            resolved = await location_resolver.resolve_for_kudago_location_or_coordinates(
+                job_id=job.id,
+                place_query=place_query,
+                location=payload.get("location"),
+                lat=None,
+                lon=None,
+                radius=None,
+                lang=lang,
+                allow_coordinates=False,
+            )
+            location = resolved["location"]
+            geo_meta = resolved["geo"]
 
-            if place_query and not location:
-                matched_location = await events_service.find_kudago_location(
-                    job_id=job.id,
-                    place_query=place_query,
-                    lang=lang,
-                )
-
-                if matched_location is not None:
-                    location = matched_location.get("slug")
-                    geo_meta = {
-                        "status": "ok",
-                        "kind": "kudago_location",
-                        "location": location,
-                        "matched_location": matched_location,
-                    }
+            if resolved["status"] != "ok":
+                result_status = resolved["status"]
+                if result_status == "geo_ambiguous":
+                    message = (
+                        "Geo resolution is ambiguous; specify a KudaGo location "
+                        "slug or place_id."
+                    )
+                elif result_status == "geo_not_found":
+                    message = (
+                        "Geo resolution found no matching place; specify a KudaGo "
+                        "location slug or place_id."
+                    )
                 else:
-                    geo_result = await geo_service.resolve_place(
-                        job_id=job.id,
-                        query=place_query,
-                        countrycodes=settings.nominatim_countrycodes,
-                        limit=5,
-                        accept_language=lang,
+                    message = (
+                        "KudaGo movie showings endpoint requires a KudaGo location "
+                        "slug or place_id. Coordinates are not supported."
                     )
-                    geo_meta = {
-                        "status": geo_result["status"],
-                        "kind": "none",
-                        "source": geo_result["source"],
-                        "query": place_query,
-                        "candidates": geo_result.get("candidates", []),
-                    }
-                    result_payload = {
-                        "status": "geo_unsupported",
-                        "message": (
-                            "KudaGo movie showings endpoint requires a KudaGo "
-                            "location slug or place_id. Coordinates are not supported."
-                        ),
-                        "geo": geo_meta,
-                        "items": [],
-                        "count": 0,
-                        "returned": 0,
-                    }
-                    await result_repo.create(
-                        job_id=job.id,
-                        result_type="movie_showings.search",
-                        items=[],
-                        meta={
-                            "status": result_payload["status"],
-                            "geo": geo_meta,
-                        },
-                    )
-                    await job_repo.mark_succeeded(job, result_payload=result_payload)
-                    await job_repo.add_event(
-                        job_id=job.id,
-                        event_type="completed",
-                        message=(
-                            "Movie showings search completed without KudaGo call "
-                            "because coordinates are unsupported"
-                        ),
-                        data={"status": result_payload["status"]},
-                    )
-                    await session.commit()
-                    return {
-                        "status": "ok",
-                        "job_id": job_id,
-                        "result_status": result_payload["status"],
-                    }
-            elif location:
-                geo_meta = {
+                result_payload = {
+                    "status": result_status,
+                    "message": message,
+                    "geo": geo_meta,
+                    "items": [],
+                    "count": 0,
+                    "returned": 0,
+                }
+                await result_repo.create(
+                    job_id=job.id,
+                    result_type="movie_showings.search",
+                    items=[],
+                    meta={"status": result_status, "geo": geo_meta},
+                )
+                await job_repo.mark_succeeded(job, result_payload=result_payload)
+                await job_repo.add_event(
+                    job_id=job.id,
+                    event_type="completed",
+                    message="Movie showings search completed without KudaGo call",
+                    data={"status": result_status},
+                )
+                await session.commit()
+                return {
                     "status": "ok",
-                    "kind": "kudago_location",
-                    "location": location,
+                    "job_id": job_id,
+                    "result_status": result_status,
                 }
 
             actual_since = payload.get("actual_since")
@@ -843,8 +718,7 @@ async def process_movies_search_job(ctx, job_id: str) -> dict:
     async with AsyncSessionLocal() as session:
         job_repo = JobRepository(session)
         result_repo = ResultRepository(session)
-        events_service = EventsService(session)
-        geo_service = GeoService(session)
+        location_resolver = LocationResolverService(session)
         movies_service = MoviesService(session)
         job = await job_repo.get_by_id(parsed_job_id)
 
@@ -873,81 +747,63 @@ async def process_movies_search_job(ctx, job_id: str) -> dict:
 
             payload = job.input_payload
             lang = payload.get("lang") or settings.kudago_lang
-            location = payload.get("location")
             place_query = payload.get("place_query")
-            geo_meta: dict | None = None
+            resolved = await location_resolver.resolve_for_kudago_location_or_coordinates(
+                job_id=job.id,
+                place_query=place_query,
+                location=payload.get("location"),
+                lat=None,
+                lon=None,
+                radius=None,
+                lang=lang,
+                allow_coordinates=False,
+            )
+            location = resolved["location"]
+            geo_meta = resolved["geo"]
 
-            if place_query and not location:
-                matched_location = await events_service.find_kudago_location(
-                    job_id=job.id,
-                    place_query=place_query,
-                    lang=lang,
-                )
-
-                if matched_location is not None:
-                    location = matched_location.get("slug")
-                    geo_meta = {
-                        "status": "ok",
-                        "kind": "kudago_location",
-                        "location": location,
-                        "matched_location": matched_location,
-                    }
+            if resolved["status"] != "ok":
+                result_status = resolved["status"]
+                if result_status == "geo_ambiguous":
+                    message = (
+                        "Geo resolution is ambiguous; specify a KudaGo location "
+                        "slug or place_id."
+                    )
+                elif result_status == "geo_not_found":
+                    message = (
+                        "Geo resolution found no matching place; specify a KudaGo "
+                        "location slug or place_id."
+                    )
                 else:
-                    geo_result = await geo_service.resolve_place(
-                        job_id=job.id,
-                        query=place_query,
-                        countrycodes=settings.nominatim_countrycodes,
-                        limit=5,
-                        accept_language=lang,
+                    message = (
+                        "KudaGo movies endpoint requires a KudaGo location slug or "
+                        "place_id. Coordinates are not supported."
                     )
-                    geo_meta = {
-                        "status": geo_result["status"],
-                        "kind": "none",
-                        "source": geo_result["source"],
-                        "query": place_query,
-                        "candidates": geo_result.get("candidates", []),
-                    }
-                    result_payload = {
-                        "status": "geo_unsupported",
-                        "message": (
-                            "KudaGo movies endpoint requires a KudaGo location slug "
-                            "or place_id. Coordinates are not supported."
-                        ),
-                        "geo": geo_meta,
-                        "items": [],
-                        "count": 0,
-                        "returned": 0,
-                    }
-                    await result_repo.create(
-                        job_id=job.id,
-                        result_type="movies.search",
-                        items=[],
-                        meta={
-                            "status": result_payload["status"],
-                            "geo": geo_meta,
-                        },
-                    )
-                    await job_repo.mark_succeeded(job, result_payload=result_payload)
-                    await job_repo.add_event(
-                        job_id=job.id,
-                        event_type="completed",
-                        message=(
-                            "Movies search completed without KudaGo call because "
-                            "coordinates are unsupported"
-                        ),
-                        data={"status": result_payload["status"]},
-                    )
-                    await session.commit()
-                    return {
-                        "status": "ok",
-                        "job_id": job_id,
-                        "result_status": result_payload["status"],
-                    }
-            elif location:
-                geo_meta = {
+                result_payload = {
+                    "status": result_status,
+                    "message": message,
+                    "geo": geo_meta,
+                    "items": [],
+                    "count": 0,
+                    "returned": 0,
+                }
+                await result_repo.create(
+                    job_id=job.id,
+                    result_type="movies.search",
+                    items=[],
+                    meta={"status": result_status, "geo": geo_meta},
+                )
+                await job_repo.mark_succeeded(job, result_payload=result_payload)
+                await job_repo.add_event(
+                    job_id=job.id,
+                    event_type="completed",
+                    message="Movies search completed without KudaGo call",
+                    data={"status": result_status},
+                )
+                await session.commit()
+                return {
                     "status": "ok",
-                    "kind": "kudago_location",
-                    "location": location,
+                    "job_id": job_id,
+                    "result_status": result_status,
                 }
 
             actual_since = payload.get("actual_since")
