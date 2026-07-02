@@ -61,6 +61,30 @@ scripts/            smoke tests
 - Docker with Docker Compose;
 - PowerShell для запуска готового smoke-test.
 
+## Quick Start
+
+Подготовьте окружение, инфраструктуру и базу данных:
+
+```powershell
+Copy-Item .env.example .env
+python -m pip install -e .
+docker compose up -d
+alembic upgrade head
+uvicorn app.main:app --reload --port 8011
+```
+
+В отдельном терминале запустите worker:
+
+```powershell
+arq app.workers.worker_settings.WorkerSettings
+```
+
+После запуска выполните smoke-test:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1
+```
+
 ## Environment Variables
 
 Создайте локальный файл окружения:

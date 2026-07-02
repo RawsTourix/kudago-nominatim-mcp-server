@@ -35,6 +35,21 @@ client
   -> GET /api/v1/jobs/{job_id}/results
 ```
 
+```mermaid
+flowchart LR
+    C[HTTP client] --> API[FastAPI router]
+    API --> DB[(PostgreSQL)]
+    API --> Q[(Redis queue)]
+    Q --> W[arq worker]
+    W --> LR[Location resolver]
+    LR --> KG[KudaGo API]
+    LR --> GC[(Geo cache)]
+    LR --> NM[Nominatim API]
+    W --> KG
+    W --> DB
+    DB --> C
+```
+
 ## Synchronous Reads
 
 Небольшие справочные и detail-запросы выполняются без Redis:

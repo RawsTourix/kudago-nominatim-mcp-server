@@ -29,6 +29,56 @@ Search-команды принимают `location` как KudaGo slug либо 
 человекочитаемое название. Events и places также поддерживают полный набор
 `lat`, `lon`, `radius`.
 
+### Examples
+
+Создание поиска событий:
+
+```http
+POST /api/v1/events/search
+Content-Type: application/json
+```
+
+```json
+{
+  "place_query": "Москва",
+  "categories": "concert",
+  "page_size": 3,
+  "lang": "ru"
+}
+```
+
+Ответ содержит идентификатор фоновой задачи:
+
+```json
+{
+  "status": "ok",
+  "job_id": "a9e38c5c-d58d-43cb-b930-f6d6b268a466",
+  "queue_job_id": "events.search:a9e38c5c-d58d-43cb-b930-f6d6b268a466",
+  "enqueued": true
+}
+```
+
+Поиск киносеансов:
+
+```http
+POST /api/v1/movie-showings/search
+Content-Type: application/json
+```
+
+```json
+{
+  "location": "msk",
+  "page_size": 3,
+  "lang": "ru"
+}
+```
+
+Получение карточки места:
+
+```http
+GET /api/v1/objects/place/1470?lang=ru
+```
+
 ## Jobs
 
 | Method | Path | Description |
