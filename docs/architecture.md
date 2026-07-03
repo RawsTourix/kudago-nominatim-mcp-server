@@ -5,8 +5,10 @@
 | Layer | Responsibility |
 |---|---|
 | `api/routers` | HTTP routes, dependencies and response mapping |
+| `mcp` | FastMCP HTTP/stdio transport, tools and MCP response envelopes |
+| `application` | shared command contracts, `CommandExecutor` and handlers |
 | `schemas` | Pydantic request and response contracts |
-| `services` | business rules and integration orchestration |
+| `services` | reusable business rules and integration orchestration |
 | `repositories` | asynchronous SQLAlchemy operations |
 | `models` | PostgreSQL tables |
 | `workers` | arq background jobs |
@@ -24,7 +26,9 @@ POST /api/v1/events/search
 
 arq worker
   -> mark job running
-  -> resolve KudaGo location or coordinates
+  -> CommandExecutor
+  -> command handler
+  -> services
   -> call KudaGo and optionally Nominatim
   -> record upstream_calls
   -> save command_results and job_events
@@ -41,16 +45,41 @@ flowchart LR
     API --> DB[(PostgreSQL)]
     API --> Q[(Redis queue)]
     Q --> W[arq worker]
-    W --> LR[Location resolver]
+    W --> CE[CommandExecutor]
+    CE --> H[Command handler]
+    H --> LR[Services / location resolver]
     LR --> KG[KudaGo API]
     LR --> GC[(Geo cache)]
     LR --> NM[Nominatim API]
-    W --> KG
-    W --> DB
+    CE --> DB
     DB --> C
 ```
 
+## MCP Command Flow
+
+MCP tools use the same executor and handlers, but execute inline instead of
+using Redis and the arq worker:
+
+```text
+MCP client
+  -> FastMCP tool over /mcp or stdio
+  -> create job with method=MCP
+  -> CommandExecutor inline
+  -> command handler
+  -> services
+  -> KudaGo / Nominatim
+  -> upstream_calls + command_results + job_events
+  -> commit diagnostics and return the MCP envelope
+```
+
+The shared command layer keeps transport-specific code limited to validation,
+job submission/execution mode, and response mapping.
+
 ## Synchronous Reads
+
+REST reference and object-detail GET endpoints intentionally remain direct,
+synchronous and untracked. They do not create jobs or write diagnostics. The
+equivalent MCP tools are always tracked through the inline command flow above.
 
 Небольшие справочные и detail-запросы выполняются без Redis:
 

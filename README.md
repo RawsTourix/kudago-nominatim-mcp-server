@@ -1,4 +1,4 @@
-# KudaGo Nominatim FastAPI Service
+# KudaGo Nominatim FastAPI + FastMCP Service
 
 ## Overview
 
@@ -22,6 +22,7 @@ See [docs/mcp.md](docs/mcp.md) for the tool catalog and response envelope.
 
 ## Features
 
+- FastMCP transport over streamable HTTP and stdio;
 - FastAPI HTTP API и автоматическая OpenAPI-документация;
 - PostgreSQL и асинхронный SQLAlchemy;
 - Redis и arq для фоновых задач;
@@ -52,9 +53,11 @@ HTTP request
 
 ```text
 app/
+  application/     shared command executor, contracts and handlers
   api/             HTTP dependencies and routers
   core/            configuration, PostgreSQL and Redis
   integrations/    KudaGo and Nominatim clients
+  mcp/             FastMCP server, execution helper and tools
   models/          SQLAlchemy models
   repositories/    database access
   schemas/         Pydantic request and response models
