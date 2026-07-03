@@ -7,6 +7,8 @@ from app.application.contracts import CommandOutput, ExecutionContext
 from app.application.handlers import (
     EventsSearchHandler,
     GeoResolveHandler,
+    ListsSearchHandler,
+    NewsSearchHandler,
     PlacesSearchHandler,
 )
 from app.repositories.job_repository import JobRepository
@@ -130,6 +132,12 @@ class CommandExecutor:
 
         if context.command == PlacesSearchHandler.command:
             return await PlacesSearchHandler(self.session).run(context, payload)
+
+        if context.command == NewsSearchHandler.command:
+            return await NewsSearchHandler(self.session).run(context, payload)
+
+        if context.command == ListsSearchHandler.command:
+            return await ListsSearchHandler(self.session).run(context, payload)
 
         raise ValueError(f"Unsupported command: {context.command}")
 

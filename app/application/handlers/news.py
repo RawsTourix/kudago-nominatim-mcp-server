@@ -1,0 +1,105 @@
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.application.contracts import CommandOutput, ExecutionContext
+from app.core.config import settings
+from app.services.location_resolver_service import LocationResolverService
+from app.services.news_service import NewsService
+
+
+class NewsSearchHandler:
+    command = "news.search"
+
+    def __init__(self, session: AsyncSession):
+        self.location_resolver = LocationResolverService(session)
+        self.news_service = NewsService(session)
+
+    async def run(
+        self,
+        context: ExecutionContext,
+        payload: dict[str, Any],
+    ) -> CommandOutput:
+        lang = payload.get("lang") or settings.kudago_lang
+        resolved = (
+            await self.location_resolver.resolve_for_kudago_location_or_coordinates(
+                job_id=context.job_id,
+                place_query=payload.get("place_query"),
+                location=payload.get("location"),
+                lat=None,
+                lon=None,
+                radius=None,
+                lang=lang,
+                allow_coordinates=False,
+            )
+        )
+
+        if resolved["status"] != "ok":
+            status = resolved["status"]
+            result_payload = {
+                "status": status,
+                "message": self._geo_message(status),
+                "geo": resolved["geo"],
+                "items": [],
+                "count": 0,
+                "returned": 0,
+            }
+            return CommandOutput(
+                status=status,
+                result_type=self.command,
+                items=[],
+                meta={"status": status, "geo": resolved["geo"]},
+                result_payload=result_payload,
+            )
+
+        location = resolved["location"]
+        filters = {
+            "location": location,
+            "place_query": payload.get("place_query"),
+            "tags": payload.get("tags"),
+            "actual_only": payload.get("actual_only"),
+        }
+        search_result = await self.news_service.search_news(
+            job_id=context.job_id,
+            location=location,
+            tags=payload.get("tags"),
+            actual_only=payload.get("actual_only"),
+            page=payload.get("page", 1),
+            page_size=payload.get("page_size", 10),
+            lang=lang,
+        )
+        items = search_result["items"]
+        result_payload = {
+            "status": "ok",
+            "source": "kudago",
+            "geo": resolved["geo"],
+            "filters": filters,
+            "count": search_result.get("count"),
+            "returned": search_result.get("returned"),
+            "items": items,
+        }
+        return CommandOutput(
+            status="ok",
+            result_type=self.command,
+            items=items,
+            meta={
+                "status": "ok",
+                "source": "kudago",
+                "geo": resolved["geo"],
+                "filters": filters,
+                "count": search_result.get("count"),
+                "returned": search_result.get("returned"),
+            },
+            result_payload=result_payload,
+        )
+
+    @staticmethod
+    def _geo_message(status: str) -> str:
+        if status == "geo_ambiguous":
+            return "Geo resolution is ambiguous; specify a KudaGo location slug."
+        if status == "geo_not_found":
+            return (
+                "Geo resolution did not find a matching place; specify a KudaGo "
+                "location slug."
+            )
+        return "KudaGo news endpoint requires a KudaGo location slug."

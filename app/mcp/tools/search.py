@@ -7,6 +7,8 @@ from app.application.executor import CommandExecutor
 from app.core.db import AsyncSessionLocal
 from app.mcp.envelopes import mcp_error, mcp_ok
 from app.schemas.events import EventsSearchRequest
+from app.schemas.lists import ListsSearchRequest
+from app.schemas.news import NewsSearchRequest
 from app.schemas.places import PlacesSearchRequest
 from app.services.job_service import JobService
 
@@ -79,6 +81,154 @@ def register_search_tools(mcp: FastMCP) -> None:
                     payload=payload,
                     source="mcp",
                     endpoint="mcp://tools/events",
+                )
+                await session.commit()
+            except Exception as exc:
+                if job is None:
+                    await session.rollback()
+                else:
+                    await session.commit()
+                return mcp_error(
+                    tool=tool_name,
+                    message=str(exc),
+                    error_type=exc.__class__.__name__,
+                    job_id=job.id if job is not None else None,
+                )
+
+        assert job is not None
+        return mcp_ok(
+            tool=tool_name,
+            job_id=job.id,
+            data=output.result_payload,
+            result_status=output.status,
+            geo=output.result_payload.get("geo"),
+            meta=output.meta,
+        )
+
+    @mcp.tool(name="news")
+    async def news(
+        location: str | None = None,
+        place_query: str | None = None,
+        tags: str | None = None,
+        actual_only: bool | None = None,
+        page: int = 1,
+        page_size: int = 10,
+        lang: str | None = "ru",
+    ) -> dict[str, Any]:
+        """Search KudaGo news for a supported KudaGo location.
+
+        Use location for a known slug such as msk, or place_query for a city
+        name that can be matched to KudaGo. Coordinate-only locations are not
+        supported by the upstream news endpoint.
+        """
+        tool_name = "news"
+        try:
+            request = NewsSearchRequest(
+                location=location,
+                place_query=place_query,
+                tags=tags,
+                actual_only=actual_only,
+                page=page,
+                page_size=page_size,
+                lang=lang,
+            )
+        except ValidationError as exc:
+            return mcp_error(
+                tool=tool_name,
+                message=str(exc),
+                error_type=exc.__class__.__name__,
+            )
+
+        payload = request.model_dump()
+        job = None
+        async with AsyncSessionLocal() as session:
+            try:
+                job = await JobService(session).create_job_from_request(
+                    endpoint="mcp://tools/news",
+                    method="MCP",
+                    command="news.search",
+                    input_payload=payload,
+                    request_text=request.place_query or request.location,
+                )
+                output = await CommandExecutor(session).run_payload(
+                    job_id=job.id,
+                    command="news.search",
+                    payload=payload,
+                    source="mcp",
+                    endpoint="mcp://tools/news",
+                )
+                await session.commit()
+            except Exception as exc:
+                if job is None:
+                    await session.rollback()
+                else:
+                    await session.commit()
+                return mcp_error(
+                    tool=tool_name,
+                    message=str(exc),
+                    error_type=exc.__class__.__name__,
+                    job_id=job.id if job is not None else None,
+                )
+
+        assert job is not None
+        return mcp_ok(
+            tool=tool_name,
+            job_id=job.id,
+            data=output.result_payload,
+            result_status=output.status,
+            geo=output.result_payload.get("geo"),
+            meta=output.meta,
+        )
+
+    @mcp.tool(name="lists")
+    async def lists(
+        location: str | None = None,
+        place_query: str | None = None,
+        tags: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+        lang: str | None = "ru",
+    ) -> dict[str, Any]:
+        """Search KudaGo editorial lists for a supported location.
+
+        Use location for a known slug such as msk, or place_query for a city
+        name that can be matched to KudaGo. Coordinate-only locations are not
+        supported by the upstream lists endpoint.
+        """
+        tool_name = "lists"
+        try:
+            request = ListsSearchRequest(
+                location=location,
+                place_query=place_query,
+                tags=tags,
+                page=page,
+                page_size=page_size,
+                lang=lang,
+            )
+        except ValidationError as exc:
+            return mcp_error(
+                tool=tool_name,
+                message=str(exc),
+                error_type=exc.__class__.__name__,
+            )
+
+        payload = request.model_dump()
+        job = None
+        async with AsyncSessionLocal() as session:
+            try:
+                job = await JobService(session).create_job_from_request(
+                    endpoint="mcp://tools/lists",
+                    method="MCP",
+                    command="lists.search",
+                    input_payload=payload,
+                    request_text=request.place_query or request.location,
+                )
+                output = await CommandExecutor(session).run_payload(
+                    job_id=job.id,
+                    command="lists.search",
+                    payload=payload,
+                    source="mcp",
+                    endpoint="mcp://tools/lists",
                 )
                 await session.commit()
             except Exception as exc:

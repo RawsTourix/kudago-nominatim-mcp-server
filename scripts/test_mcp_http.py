@@ -23,7 +23,9 @@ async def run(query: str, url: str) -> None:
         tools = await client.list_tools()
         tool_names = sorted(tool.name for tool in tools)
         print("TOOLS:", ", ".join(tool_names))
-        assert "resolve_place" in tool_names
+        assert {"events", "lists", "news", "places", "resolve_place"} <= set(
+            tool_names
+        )
 
         resolve_result = await client.call_tool(
             "resolve_place",
@@ -44,6 +46,17 @@ async def run(query: str, url: str) -> None:
 
         places_result = await client.call_tool(
             "places",
+            {"location": "msk", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+
+        news_result = await client.call_tool(
+            "news",
+            {"location": "msk", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+        lists_result = await client.call_tool(
+            "lists",
             {"location": "msk", "page_size": 3, "lang": "ru"},
             timeout=60.0,
         )
@@ -70,6 +83,15 @@ async def run(query: str, url: str) -> None:
     assert places_result.data["tool"] == "places"
     assert places_result.data["result_status"] == "ok"
     assert places_result.data["data"]["status"] == "ok"
+
+    for tool_name, result in (("news", news_result), ("lists", lists_result)):
+        print(f"{tool_name.upper()}:")
+        print_result(result.data)
+        assert isinstance(result.data, dict)
+        assert result.data["status"] == "ok"
+        assert result.data["tool"] == tool_name
+        assert result.data["result_status"] == "ok"
+        assert result.data["data"]["status"] == "ok"
 
 
 if __name__ == "__main__":

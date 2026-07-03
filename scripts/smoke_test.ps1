@@ -179,10 +179,32 @@ $newsJob = Test-Job `
     -Url "$BaseUrl/news/search" `
     -Body @{ location = "msk"; page_size = 3; lang = "ru" }
 
+$newsMoscowJob = Test-Job `
+    -Name "news.search place_query=Moscow" `
+    -Url "$BaseUrl/news/search" `
+    -Body @{ place_query = $moscow; page_size = 3; lang = "ru" }
+
+$newsAmbiguousJob = Test-Job `
+    -Name "news.search place_query=Nakhabino" `
+    -Url "$BaseUrl/news/search" `
+    -Body @{ place_query = $nakhabino; page_size = 3; lang = "ru" } `
+    -ExpectedResultStatus "geo_ambiguous"
+
 $listsJob = Test-Job `
     -Name "lists.search location=msk" `
     -Url "$BaseUrl/lists/search" `
     -Body @{ location = "msk"; page_size = 3; lang = "ru" }
+
+$listsMoscowJob = Test-Job `
+    -Name "lists.search place_query=Moscow" `
+    -Url "$BaseUrl/lists/search" `
+    -Body @{ place_query = $moscow; page_size = 3; lang = "ru" }
+
+$listsAmbiguousJob = Test-Job `
+    -Name "lists.search place_query=Nakhabino" `
+    -Url "$BaseUrl/lists/search" `
+    -Body @{ place_query = $nakhabino; page_size = 3; lang = "ru" } `
+    -ExpectedResultStatus "geo_ambiguous"
 
 Write-Host ""
 Write-Host "=== objects ==="

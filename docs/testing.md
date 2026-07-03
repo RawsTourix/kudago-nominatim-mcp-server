@@ -57,9 +57,9 @@ python scripts/test_mcp_http.py "Апрелевка"
 ```
 
 Each script verifies `ping`, tool discovery, inline `resolve_place`, `events`,
-and `places` calls, and their MCP envelopes. The in-memory script also checks
-the `geo_ambiguous` results. The scripts print `job_id` values for the
-diagnostics check.
+`places`, `news`, and `lists` calls, and their MCP envelopes. The in-memory
+script also checks the `geo_ambiguous` results. The scripts print `job_id`
+values for the diagnostics check.
 
 ## 4. Persisted diagnostics
 

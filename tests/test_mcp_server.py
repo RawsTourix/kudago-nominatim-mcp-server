@@ -9,7 +9,7 @@ async def test_first_application_tools_are_registered():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
-    assert {"events", "places", "resolve_place"} <= {
+    assert {"events", "lists", "news", "places", "resolve_place"} <= {
         tool.name for tool in tools
     }
 
