@@ -90,5 +90,8 @@ async def test_places_handler_returns_geo_ambiguity_without_kudago_call():
 
     assert output.status == "geo_ambiguous"
     assert output.items == []
+    assert output.result_payload["message"] == (
+        "Geo resolution is ambiguous; choose one candidate or pass coordinates."
+    )
     assert output.result_payload["geo"] == geo
     handler.places_service.search_places.assert_not_awaited()

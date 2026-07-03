@@ -9,6 +9,7 @@ async def test_first_application_tools_are_registered():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
+    tools_by_name = {tool.name: tool for tool in tools}
     assert {
         "events",
         "lists",
@@ -19,9 +20,9 @@ async def test_first_application_tools_are_registered():
         "places",
         "reference",
         "resolve_place",
-    } <= {
-        tool.name for tool in tools
-    }
+    } <= set(tools_by_name)
+    assert "Use movie_showings" in tools_by_name["places"].description
+    assert "actual cinema showings" in tools_by_name["movie_showings"].description
 
 
 @pytest.mark.asyncio

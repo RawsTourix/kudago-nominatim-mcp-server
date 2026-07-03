@@ -40,7 +40,7 @@ class PlacesSearchHandler:
             result_status = resolved["status"]
             result_payload = {
                 "status": result_status,
-                "message": "Geo resolution did not produce a usable result",
+                "message": self._geo_message(result_status),
                 "geo": geo_meta,
                 "items": [],
                 "count": 0,
@@ -126,3 +126,12 @@ class PlacesSearchHandler:
             result_payload=result_payload,
             events=events,
         )
+
+    @staticmethod
+    def _geo_message(status: str) -> str:
+        if status == "geo_ambiguous":
+            return (
+                "Geo resolution is ambiguous; choose one candidate or pass "
+                "coordinates."
+            )
+        return "Geo resolution did not find a matching place."

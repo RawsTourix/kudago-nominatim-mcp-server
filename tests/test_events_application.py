@@ -107,7 +107,10 @@ async def test_events_handler_returns_geo_ambiguity_without_kudago_call():
     assert output.items == []
     assert output.result_payload == {
         "status": "geo_ambiguous",
-        "message": "Geo resolution did not produce a usable result",
+        "message": (
+            "Geo resolution is ambiguous; choose one candidate or pass "
+            "coordinates."
+        ),
         "geo": geo,
         "items": [],
         "count": 0,

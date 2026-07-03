@@ -136,11 +136,12 @@ def register_search_tools(mcp: FastMCP) -> None:
         page_size: int = 10,
         lang: str | None = "ru",
     ) -> dict[str, Any]:
-        """Search KudaGo movie showings for a movie, cinema, or location.
+        """Find actual cinema showings and cinemas for a movie or location.
 
-        When movie_id is supplied, the movie-specific showings endpoint is
-        used. Date bounds must be provided together; when both are omitted,
-        the next seven days are searched.
+        Use this after movies to find where and when a film is showing. When
+        movie_id is supplied, the movie-specific showings endpoint is used.
+        Date bounds must be provided together; when both are omitted, the next
+        seven days are searched.
         """
         tool_name = "movie_showings"
         try:
@@ -269,12 +270,13 @@ def register_search_tools(mcp: FastMCP) -> None:
         page_size: int = 10,
         lang: str | None = "ru",
     ) -> dict[str, Any]:
-        """Search KudaGo places using location, geo, and category filters.
+        """Search general KudaGo places using location, geo, and filters.
 
         Use location for a known KudaGo slug such as msk, place_query for a
-        free-form place, or provide lat, lon, and radius together. Set
-        has_showings to true to find cinemas; when its time window is omitted,
-        the next seven days are used.
+        free-form place, or provide lat, lon, and radius together. Avoid
+        has_showings for cinema availability because the upstream places
+        endpoint may time out. Use movie_showings to find actual cinema
+        showings and cinemas instead.
         """
         tool_name = "places"
         try:

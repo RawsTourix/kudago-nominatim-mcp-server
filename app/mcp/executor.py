@@ -5,6 +5,7 @@ from app.application.contracts import CommandOutput
 from app.application.executor import CommandExecutor
 from app.core.db import AsyncSessionLocal
 from app.mcp.envelopes import mcp_error, mcp_ok
+from app.mcp.normalization import compact_geo, compact_mcp_data, compact_mcp_meta
 from app.services.job_service import JobService
 
 
@@ -59,8 +60,8 @@ async def run_mcp_command(
     return mcp_ok(
         tool=tool_name,
         job_id=job.id,
-        data=output.result_payload,
+        data=compact_mcp_data(output.result_payload),
         result_status=output.status,
-        geo=geo,
-        meta=output.meta,
+        geo=compact_geo(geo),
+        meta=compact_mcp_meta(output.meta),
     )
