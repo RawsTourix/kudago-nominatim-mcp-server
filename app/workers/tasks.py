@@ -6,7 +6,6 @@ from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
-from app.services.events_service import EventsService
 from app.services.job_service import JobService
 from app.services.location_resolver_service import LocationResolverService
 from app.services.lists_service import ListsService
@@ -107,173 +106,30 @@ async def process_events_search_job(ctx, job_id: str) -> dict:
     parsed_job_id = UUID(job_id)
 
     async with AsyncSessionLocal() as session:
-        job_repo = JobRepository(session)
-        result_repo = ResultRepository(session)
-        events_service = EventsService(session)
-        location_resolver = LocationResolverService(session)
-        job = await job_repo.get_by_id(parsed_job_id)
-
-        if job is None:
-            return {"status": "error", "message": "Job not found", "job_id": job_id}
-
-        if job.status == "succeeded":
-            return {
-                "status": "ok",
-                "message": "Job already succeeded",
-                "job_id": job_id,
-            }
+        executor = CommandExecutor(session)
 
         try:
-            await job_repo.mark_running(job)
-            await job_repo.add_event(
-                job_id=job.id,
-                event_type="started",
-                message="Events search job started",
-                data={"command": job.command},
-            )
-
-            payload = job.input_payload
-            lang = payload.get("lang") or settings.kudago_lang
-            place_query = payload.get("place_query")
-            resolved = await location_resolver.resolve_for_kudago_location_or_coordinates(
-                job_id=job.id,
-                place_query=place_query,
-                location=payload.get("location"),
-                lat=payload.get("lat"),
-                lon=payload.get("lon"),
-                radius=payload.get("radius"),
-                lang=lang,
-                allow_coordinates=True,
-            )
-            location = resolved["location"]
-            lat = resolved["lat"]
-            lon = resolved["lon"]
-            radius = resolved["radius"]
-            geo_meta = resolved["geo"]
-
-            if resolved["status"] != "ok":
-                result_status = resolved["status"]
-                result_payload = {
-                    "status": result_status,
-                    "message": "Geo resolution did not produce a usable result",
-                    "geo": geo_meta,
-                    "items": [],
-                    "count": 0,
-                    "returned": 0,
-                }
-                await result_repo.create(
-                    job_id=job.id,
-                    result_type="events.search",
-                    items=[],
-                    meta={"status": result_status, "geo": geo_meta},
-                )
-                await job_repo.mark_succeeded(job, result_payload=result_payload)
-                await job_repo.add_event(
-                    job_id=job.id,
-                    event_type="completed",
-                    message="Events search completed without KudaGo call",
-                    data={"status": result_status},
-                )
-                await session.commit()
-                return {
-                    "status": "ok",
-                    "job_id": job_id,
-                    "result_status": result_status,
-                }
-
-            actual_since = payload.get("actual_since")
-            actual_until = payload.get("actual_until")
-
-            if actual_since is None and not payload.get("include_past", False):
-                actual_since = int(datetime.now(timezone.utc).timestamp())
-                await job_repo.add_event(
-                    job_id=job.id,
-                    event_type="actual_since_defaulted",
-                    message=(
-                        "actual_since was not provided, defaulted to current UTC timestamp"
-                    ),
-                    data={"actual_since": actual_since},
-                )
-
-            filters = {
-                "actual_since": actual_since,
-                "actual_until": actual_until,
-                "include_past": payload.get("include_past", False),
-                "categories": payload.get("categories"),
-                "tags": payload.get("tags"),
-                "is_free": payload.get("is_free"),
-            }
-
-            search_result = await events_service.search_events(
-                job_id=job.id,
-                location=location,
-                lat=lat,
-                lon=lon,
-                radius=radius,
-                actual_since=actual_since,
-                actual_until=actual_until,
-                categories=payload.get("categories"),
-                tags=payload.get("tags"),
-                is_free=payload.get("is_free"),
-                page=payload.get("page", 1),
-                page_size=payload.get("page_size", 10),
-                lang=lang,
-            )
-            items = search_result["items"]
-            result_payload = {
-                "status": "ok",
-                "source": "kudago",
-                "geo": geo_meta,
-                "filters": filters,
-                "count": search_result.get("count"),
-                "returned": search_result.get("returned"),
-                "items": items,
-            }
-            await result_repo.create(
-                job_id=job.id,
-                result_type="events.search",
-                items=items,
-                meta={
-                    "status": "ok",
-                    "source": "kudago",
-                    "geo": geo_meta,
-                    "filters": filters,
-                    "count": search_result.get("count"),
-                    "returned": search_result.get("returned"),
-                },
-            )
-            await job_repo.mark_succeeded(job, result_payload=result_payload)
-            await job_repo.add_event(
-                job_id=job.id,
-                event_type="completed",
-                message="Events search job completed",
-                data={
-                    "status": "ok",
-                    "returned": search_result.get("returned"),
-                    "count": search_result.get("count"),
-                },
+            output = await executor.run_existing_job(
+                parsed_job_id,
+                source="worker",
             )
             await session.commit()
+
             return {
                 "status": "ok",
                 "job_id": job_id,
-                "returned": search_result.get("returned"),
+                "result_status": output.status,
             }
-        except Exception as exc:
-            await job_repo.mark_failed(
-                job,
-                error_type=exc.__class__.__name__,
-                error_message=str(exc),
-            )
-            await job_repo.add_event(
-                job_id=job.id,
-                event_type="failed",
-                message="Events search job failed",
-                data={
-                    "error_type": exc.__class__.__name__,
-                    "error_message": str(exc),
-                },
-            )
+        except ValueError as exc:
+            if str(exc).startswith("Job not found:"):
+                return {
+                    "status": "error",
+                    "message": "Job not found",
+                    "job_id": job_id,
+                }
+            await session.commit()
+            raise
+        except Exception:
             await session.commit()
             raise
 

@@ -15,7 +15,7 @@ from app.mcp.server import create_mcp_server
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Call resolve_place in memory")
+    parser = argparse.ArgumentParser(description="Smoke-test MCP tools in memory")
     parser.add_argument("query", nargs="?", default="Нахабино")
     return parser.parse_args()
 
@@ -32,7 +32,7 @@ async def run(query: str) -> None:
         print("TOOLS:", ", ".join(tool_names))
         assert "resolve_place" in tool_names
 
-        result = await client.call_tool(
+        resolve_result = await client.call_tool(
             "resolve_place",
             {
                 "query": query,
@@ -43,11 +43,40 @@ async def run(query: str) -> None:
             timeout=60.0,
         )
 
-    print_result(result.data)
-    assert isinstance(result.data, dict)
-    assert result.data["status"] == "ok"
-    assert result.data["tool"] == "resolve_place"
-    assert result.data["job_id"]
+        events_result = await client.call_tool(
+            "events",
+            {"location": "msk", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+
+        ambiguous_result = await client.call_tool(
+            "events",
+            {"place_query": "Нахабино", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+
+    print("RESOLVE_PLACE:")
+    print_result(resolve_result.data)
+    assert isinstance(resolve_result.data, dict)
+    assert resolve_result.data["status"] == "ok"
+    assert resolve_result.data["tool"] == "resolve_place"
+    assert resolve_result.data["job_id"]
+
+    print("EVENTS:")
+    print_result(events_result.data)
+    assert isinstance(events_result.data, dict)
+    assert events_result.data["status"] == "ok"
+    assert events_result.data["tool"] == "events"
+    assert events_result.data["result_status"] == "ok"
+    assert events_result.data["data"]["status"] == "ok"
+    assert isinstance(events_result.data["data"]["items"], list)
+
+    print("EVENTS AMBIGUOUS:")
+    print_result(ambiguous_result.data)
+    assert isinstance(ambiguous_result.data, dict)
+    assert ambiguous_result.data["status"] == "ok"
+    assert ambiguous_result.data["tool"] == "events"
+    assert ambiguous_result.data["result_status"] == "geo_ambiguous"
 
 
 if __name__ == "__main__":

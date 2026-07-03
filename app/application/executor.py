@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.contracts import CommandOutput, ExecutionContext
-from app.application.handlers import GeoResolveHandler
+from app.application.handlers import EventsSearchHandler, GeoResolveHandler
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
 
@@ -112,6 +112,9 @@ class CommandExecutor:
     ) -> CommandOutput:
         if context.command == GeoResolveHandler.command:
             return await GeoResolveHandler(self.session).run(context, payload)
+
+        if context.command == EventsSearchHandler.command:
+            return await EventsSearchHandler(self.session).run(context, payload)
 
         raise ValueError(f"Unsupported command: {context.command}")
 

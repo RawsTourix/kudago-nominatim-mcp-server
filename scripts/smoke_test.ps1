@@ -92,6 +92,9 @@ Write-Host "BaseUrl: $BaseUrl"
 $nakhabino = -join @(
     0x041D, 0x0430, 0x0445, 0x0430, 0x0431, 0x0438, 0x043D, 0x043E
 ).ForEach({ [char]$_ })
+$moscow = -join @(
+    0x041C, 0x043E, 0x0441, 0x043A, 0x0432, 0x0430
+).ForEach({ [char]$_ })
 
 Write-Host ""
 Write-Host "=== health ==="
@@ -132,6 +135,17 @@ $geoJob = Test-Job `
         accept_language = "ru"
     } `
     -ExpectedResultStatus "ambiguous"
+
+$eventsMoscowJob = Test-Job `
+    -Name "events.search place_query=Moscow" `
+    -Url "$BaseUrl/events/search" `
+    -Body @{ place_query = $moscow; page_size = 3; lang = "ru" }
+
+$eventsAmbiguousJob = Test-Job `
+    -Name "events.search place_query=Nakhabino" `
+    -Url "$BaseUrl/events/search" `
+    -Body @{ place_query = $nakhabino; page_size = 3; lang = "ru" } `
+    -ExpectedResultStatus "geo_ambiguous"
 
 $movieShowingsJob = Test-Job `
     -Name "movie_showings.search location=msk" `
