@@ -56,10 +56,9 @@ An alternative query can be supplied as the positional argument:
 python scripts/test_mcp_http.py "Апрелевка"
 ```
 
-Each script verifies `ping`, tool discovery, inline `resolve_place`, `events`,
-`places`, `news`, and `lists` calls, and their MCP envelopes. The in-memory
-script also checks the `geo_ambiguous` results. The scripts print `job_id`
-values for the diagnostics check.
+Each script verifies `ping`, tool discovery, all search tools, and their MCP
+envelopes. The in-memory script also checks the `geo_ambiguous` results. The
+scripts print `job_id` values for the diagnostics check.
 
 ## 4. Persisted diagnostics
 

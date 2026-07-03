@@ -8,6 +8,8 @@ from app.application.handlers import (
     EventsSearchHandler,
     GeoResolveHandler,
     ListsSearchHandler,
+    MovieShowingsSearchHandler,
+    MoviesSearchHandler,
     NewsSearchHandler,
     PlacesSearchHandler,
 )
@@ -138,6 +140,15 @@ class CommandExecutor:
 
         if context.command == ListsSearchHandler.command:
             return await ListsSearchHandler(self.session).run(context, payload)
+
+        if context.command == MoviesSearchHandler.command:
+            return await MoviesSearchHandler(self.session).run(context, payload)
+
+        if context.command == MovieShowingsSearchHandler.command:
+            return await MovieShowingsSearchHandler(self.session).run(
+                context,
+                payload,
+            )
 
         raise ValueError(f"Unsupported command: {context.command}")
 

@@ -8,6 +8,8 @@ from app.core.db import AsyncSessionLocal
 from app.mcp.envelopes import mcp_error, mcp_ok
 from app.schemas.events import EventsSearchRequest
 from app.schemas.lists import ListsSearchRequest
+from app.schemas.movie_showings import MovieShowingsSearchRequest
+from app.schemas.movies import MoviesSearchRequest
 from app.schemas.news import NewsSearchRequest
 from app.schemas.places import PlacesSearchRequest
 from app.services.job_service import JobService
@@ -81,6 +83,172 @@ def register_search_tools(mcp: FastMCP) -> None:
                     payload=payload,
                     source="mcp",
                     endpoint="mcp://tools/events",
+                )
+                await session.commit()
+            except Exception as exc:
+                if job is None:
+                    await session.rollback()
+                else:
+                    await session.commit()
+                return mcp_error(
+                    tool=tool_name,
+                    message=str(exc),
+                    error_type=exc.__class__.__name__,
+                    job_id=job.id if job is not None else None,
+                )
+
+        assert job is not None
+        return mcp_ok(
+            tool=tool_name,
+            job_id=job.id,
+            data=output.result_payload,
+            result_status=output.status,
+            geo=output.result_payload.get("geo"),
+            meta=output.meta,
+        )
+
+    @mcp.tool(name="movies")
+    async def movies(
+        location: str | None = None,
+        place_query: str | None = None,
+        place_id: int | None = None,
+        tags: str | None = None,
+        is_free: bool | None = None,
+        premiering_in_location: bool | None = None,
+        actual_since: str | int | None = None,
+        actual_until: str | int | None = None,
+        include_past: bool = False,
+        page: int = 1,
+        page_size: int = 10,
+        lang: str | None = "ru",
+    ) -> dict[str, Any]:
+        """Search KudaGo movies using location, cinema, and date filters.
+
+        Use a KudaGo location slug or place_id. A free-form place_query may be
+        resolved to a supported KudaGo location; coordinate-only results are
+        not supported by the movies endpoint.
+        """
+        tool_name = "movies"
+        try:
+            request = MoviesSearchRequest(
+                location=location,
+                place_query=place_query,
+                place_id=place_id,
+                tags=tags,
+                is_free=is_free,
+                premiering_in_location=premiering_in_location,
+                actual_since=actual_since,
+                actual_until=actual_until,
+                include_past=include_past,
+                page=page,
+                page_size=page_size,
+                lang=lang,
+            )
+        except ValidationError as exc:
+            return mcp_error(
+                tool=tool_name,
+                message=str(exc),
+                error_type=exc.__class__.__name__,
+            )
+
+        payload = request.model_dump()
+        job = None
+        async with AsyncSessionLocal() as session:
+            try:
+                job = await JobService(session).create_job_from_request(
+                    endpoint="mcp://tools/movies",
+                    method="MCP",
+                    command="movies.search",
+                    input_payload=payload,
+                    request_text=request.place_query or request.location,
+                )
+                output = await CommandExecutor(session).run_payload(
+                    job_id=job.id,
+                    command="movies.search",
+                    payload=payload,
+                    source="mcp",
+                    endpoint="mcp://tools/movies",
+                )
+                await session.commit()
+            except Exception as exc:
+                if job is None:
+                    await session.rollback()
+                else:
+                    await session.commit()
+                return mcp_error(
+                    tool=tool_name,
+                    message=str(exc),
+                    error_type=exc.__class__.__name__,
+                    job_id=job.id if job is not None else None,
+                )
+
+        assert job is not None
+        return mcp_ok(
+            tool=tool_name,
+            job_id=job.id,
+            data=output.result_payload,
+            result_status=output.status,
+            geo=output.result_payload.get("geo"),
+            meta=output.meta,
+        )
+
+    @mcp.tool(name="movie_showings")
+    async def movie_showings(
+        location: str | None = None,
+        place_query: str | None = None,
+        movie_id: int | None = None,
+        place_id: int | None = None,
+        actual_since: str | int | None = None,
+        actual_until: str | int | None = None,
+        is_free: bool | None = None,
+        page: int = 1,
+        page_size: int = 10,
+        lang: str | None = "ru",
+    ) -> dict[str, Any]:
+        """Search KudaGo movie showings for a movie, cinema, or location.
+
+        When movie_id is supplied, the movie-specific showings endpoint is
+        used. Date bounds must be provided together; when both are omitted,
+        the next seven days are searched.
+        """
+        tool_name = "movie_showings"
+        try:
+            request = MovieShowingsSearchRequest(
+                location=location,
+                place_query=place_query,
+                movie_id=movie_id,
+                place_id=place_id,
+                actual_since=actual_since,
+                actual_until=actual_until,
+                is_free=is_free,
+                page=page,
+                page_size=page_size,
+                lang=lang,
+            )
+        except ValidationError as exc:
+            return mcp_error(
+                tool=tool_name,
+                message=str(exc),
+                error_type=exc.__class__.__name__,
+            )
+
+        payload = request.model_dump()
+        job = None
+        async with AsyncSessionLocal() as session:
+            try:
+                job = await JobService(session).create_job_from_request(
+                    endpoint="mcp://tools/movie_showings",
+                    method="MCP",
+                    command="movie_showings.search",
+                    input_payload=payload,
+                    request_text=request.place_query or request.location,
+                )
+                output = await CommandExecutor(session).run_payload(
+                    job_id=job.id,
+                    command="movie_showings.search",
+                    payload=payload,
+                    source="mcp",
+                    endpoint="mcp://tools/movie_showings",
                 )
                 await session.commit()
             except Exception as exc:

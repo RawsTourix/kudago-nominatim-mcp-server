@@ -169,10 +169,32 @@ $movieShowingsJob = Test-Job `
     -Url "$BaseUrl/movie-showings/search" `
     -Body @{ location = "msk"; page_size = 3; lang = "ru" }
 
+$movieShowingsMoscowJob = Test-Job `
+    -Name "movie_showings.search place_query=Moscow" `
+    -Url "$BaseUrl/movie-showings/search" `
+    -Body @{ place_query = $moscow; page_size = 3; lang = "ru" }
+
+$movieShowingsAmbiguousJob = Test-Job `
+    -Name "movie_showings.search place_query=Nakhabino" `
+    -Url "$BaseUrl/movie-showings/search" `
+    -Body @{ place_query = $nakhabino; page_size = 3; lang = "ru" } `
+    -ExpectedResultStatus "geo_ambiguous"
+
 $moviesJob = Test-Job `
     -Name "movies.search location=msk" `
     -Url "$BaseUrl/movies/search" `
     -Body @{ location = "msk"; page_size = 3; lang = "ru" }
+
+$moviesMoscowJob = Test-Job `
+    -Name "movies.search place_query=Moscow" `
+    -Url "$BaseUrl/movies/search" `
+    -Body @{ place_query = $moscow; page_size = 3; lang = "ru" }
+
+$moviesAmbiguousJob = Test-Job `
+    -Name "movies.search place_query=Nakhabino" `
+    -Url "$BaseUrl/movies/search" `
+    -Body @{ place_query = $nakhabino; page_size = 3; lang = "ru" } `
+    -ExpectedResultStatus "geo_ambiguous"
 
 $newsJob = Test-Job `
     -Name "news.search location=msk" `

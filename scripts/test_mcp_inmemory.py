@@ -30,9 +30,15 @@ async def run(query: str) -> None:
         tools = await client.list_tools()
         tool_names = sorted(tool.name for tool in tools)
         print("TOOLS:", ", ".join(tool_names))
-        assert {"events", "lists", "news", "places", "resolve_place"} <= set(
-            tool_names
-        )
+        assert {
+            "events",
+            "lists",
+            "movie_showings",
+            "movies",
+            "news",
+            "places",
+            "resolve_place",
+        } <= set(tool_names)
 
         resolve_result = await client.call_tool(
             "resolve_place",
@@ -89,6 +95,26 @@ async def run(query: str) -> None:
             {"place_query": "Нахабино", "page_size": 3, "lang": "ru"},
             timeout=60.0,
         )
+        movies_result = await client.call_tool(
+            "movies",
+            {"location": "msk", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+        movies_ambiguous_result = await client.call_tool(
+            "movies",
+            {"place_query": "Нахабино", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+        movie_showings_result = await client.call_tool(
+            "movie_showings",
+            {"location": "msk", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+        movie_showings_ambiguous_result = await client.call_tool(
+            "movie_showings",
+            {"place_query": "Нахабино", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
 
     print("RESOLVE_PLACE:")
     print_result(resolve_result.data)
@@ -140,6 +166,29 @@ async def run(query: str) -> None:
     for tool_name, result in (
         ("news", news_ambiguous_result),
         ("lists", lists_ambiguous_result),
+    ):
+        print(f"{tool_name.upper()} AMBIGUOUS:")
+        print_result(result.data)
+        assert isinstance(result.data, dict)
+        assert result.data["status"] == "ok"
+        assert result.data["tool"] == tool_name
+        assert result.data["result_status"] == "geo_ambiguous"
+
+    for tool_name, result in (
+        ("movies", movies_result),
+        ("movie_showings", movie_showings_result),
+    ):
+        print(f"{tool_name.upper()}:")
+        print_result(result.data)
+        assert isinstance(result.data, dict)
+        assert result.data["status"] == "ok"
+        assert result.data["tool"] == tool_name
+        assert result.data["result_status"] == "ok"
+        assert result.data["data"]["status"] == "ok"
+
+    for tool_name, result in (
+        ("movies", movies_ambiguous_result),
+        ("movie_showings", movie_showings_ambiguous_result),
     ):
         print(f"{tool_name.upper()} AMBIGUOUS:")
         print_result(result.data)
