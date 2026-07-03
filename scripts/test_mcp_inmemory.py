@@ -36,7 +36,9 @@ async def run(query: str) -> None:
             "movie_showings",
             "movies",
             "news",
+            "object",
             "places",
+            "reference",
             "resolve_place",
         } <= set(tool_names)
 
@@ -115,6 +117,38 @@ async def run(query: str) -> None:
             {"place_query": "Нахабино", "page_size": 3, "lang": "ru"},
             timeout=60.0,
         )
+        reference_locations_result = await client.call_tool(
+            "reference",
+            {"kind": "locations", "lang": "ru"},
+            timeout=60.0,
+        )
+        reference_categories_result = await client.call_tool(
+            "reference",
+            {"kind": "event_categories", "lang": "ru"},
+            timeout=60.0,
+        )
+        reference_location_result = await client.call_tool(
+            "reference",
+            {"kind": "location", "slug": "msk", "lang": "ru"},
+            timeout=60.0,
+        )
+        object_location_result = await client.call_tool(
+            "object",
+            {"object_type": "location", "object_id": "msk", "lang": "ru"},
+            timeout=60.0,
+        )
+        event_object_result = None
+        event_items = events_result.data["data"].get("items", [])
+        if event_items:
+            event_object_result = await client.call_tool(
+                "object",
+                {
+                    "object_type": "event",
+                    "object_id": str(event_items[0]["id"]),
+                    "lang": "ru",
+                },
+                timeout=60.0,
+            )
 
     print("RESOLVE_PLACE:")
     print_result(resolve_result.data)
@@ -173,6 +207,31 @@ async def run(query: str) -> None:
         assert result.data["status"] == "ok"
         assert result.data["tool"] == tool_name
         assert result.data["result_status"] == "geo_ambiguous"
+
+    for result in (
+        reference_locations_result,
+        reference_categories_result,
+        reference_location_result,
+    ):
+        print("REFERENCE:")
+        print_result(result.data)
+        assert isinstance(result.data, dict)
+        assert result.data["status"] == "ok"
+        assert result.data["tool"] == "reference"
+        assert result.data["result_status"] == "ok"
+
+    print("OBJECT LOCATION:")
+    print_result(object_location_result.data)
+    assert object_location_result.data["status"] == "ok"
+    assert object_location_result.data["tool"] == "object"
+    assert object_location_result.data["data"]["object_type"] == "location"
+
+    if event_object_result is not None:
+        print("OBJECT EVENT:")
+        print_result(event_object_result.data)
+        assert event_object_result.data["status"] == "ok"
+        assert event_object_result.data["tool"] == "object"
+        assert event_object_result.data["data"]["object_type"] == "event"
 
     for tool_name, result in (
         ("movies", movies_result),

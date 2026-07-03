@@ -1,4 +1,5 @@
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,13 +22,25 @@ from app.integrations.kudago import (
     place_comments,
     place_detail,
 )
+from app.repositories.upstream_call_repository import UpstreamCallRepository
+from app.services.tracked_kudago_client import TrackedKudaGoHttpClient
 
 
 class ObjectService:
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.upstream_call_repo = UpstreamCallRepository(session)
 
-    def create_client(self) -> KudaGoHttpClient:
+    def create_client(self, *, job_id: UUID | None = None) -> KudaGoHttpClient:
+        if job_id is not None:
+            return TrackedKudaGoHttpClient(
+                job_id=job_id,
+                upstream_call_repo=self.upstream_call_repo,
+                operation_prefix="object",
+                base_url=settings.kudago_base_url,
+                user_agent=settings.kudago_user_agent,
+                trust_env=True,
+            )
         return KudaGoHttpClient(
             base_url=settings.kudago_base_url,
             user_agent=settings.kudago_user_agent,
@@ -42,9 +55,10 @@ class ObjectService:
         include_comments: bool = False,
         include_showings: bool = False,
         lang: str = "ru",
+        job_id: UUID | None = None,
     ) -> dict[str, Any]:
         kind = object_type.strip().lower()
-        client = self.create_client()
+        client = self.create_client(job_id=job_id)
 
         try:
             result: dict[str, Any] = {

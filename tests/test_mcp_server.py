@@ -15,7 +15,9 @@ async def test_first_application_tools_are_registered():
         "movie_showings",
         "movies",
         "news",
+        "object",
         "places",
+        "reference",
         "resolve_place",
     } <= {
         tool.name for tool in tools
@@ -29,6 +31,17 @@ async def test_places_tool_rejects_partial_coordinates_before_creating_job():
 
     assert result.data["status"] == "error"
     assert result.data["tool"] == "places"
+    assert result.data["job_id"] is None
+    assert result.data["error_type"] == "ValidationError"
+
+
+@pytest.mark.asyncio
+async def test_reference_tool_rejects_location_without_slug():
+    async with Client(mcp) as client:
+        result = await client.call_tool("reference", {"kind": "location"})
+
+    assert result.data["status"] == "error"
+    assert result.data["tool"] == "reference"
     assert result.data["job_id"] is None
     assert result.data["error_type"] == "ValidationError"
 

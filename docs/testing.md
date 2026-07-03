@@ -56,8 +56,9 @@ An alternative query can be supplied as the positional argument:
 python scripts/test_mcp_http.py "Апрелевка"
 ```
 
-Each script verifies `ping`, tool discovery, all search tools, and their MCP
-envelopes. The in-memory script also checks the `geo_ambiguous` results. The
+Each script verifies `ping`, tool discovery, all search tools, `reference`,
+`object`, and their MCP envelopes. The in-memory script also checks the
+`geo_ambiguous` results and opens the first returned event when available. The
 scripts print `job_id` values for the diagnostics check.
 
 ## 4. Persisted diagnostics

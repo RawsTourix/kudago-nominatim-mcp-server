@@ -11,7 +11,9 @@ from app.application.handlers import (
     MovieShowingsSearchHandler,
     MoviesSearchHandler,
     NewsSearchHandler,
+    ObjectDetailHandler,
     PlacesSearchHandler,
+    ReferenceHandler,
 )
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
@@ -149,6 +151,12 @@ class CommandExecutor:
                 context,
                 payload,
             )
+
+        if context.command == ReferenceHandler.command:
+            return await ReferenceHandler(self.session).run(context, payload)
+
+        if context.command == ObjectDetailHandler.command:
+            return await ObjectDetailHandler(self.session).run(context, payload)
 
         raise ValueError(f"Unsupported command: {context.command}")
 

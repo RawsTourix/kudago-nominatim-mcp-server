@@ -70,11 +70,28 @@ function Test-Job {
 
     $job = Wait-Job -JobId $created.job_id
     Write-Host "job.status:" $job.job.status
-    Write-Host "result.status:" $job.job.result_payload.status
 
     if ($job.job.status -ne "succeeded") {
-        throw "$Name failed: job.status=$($job.job.status)"
+        $errorDetails = (@(
+            $job.job.error_type
+            $job.job.error_message
+        ) | Where-Object { $_ }) -join ": "
+
+        if (-not $errorDetails) {
+            $errorDetails = "no error details"
+        }
+
+        throw (
+            "$Name failed: job.status=$($job.job.status), " +
+            "error=$errorDetails, job_id=$($created.job_id)"
+        )
     }
+
+    if ($null -eq $job.job.result_payload) {
+        throw "$Name failed: succeeded job has no result_payload, job_id=$($created.job_id)"
+    }
+
+    Write-Host "result.status:" $job.job.result_payload.status
 
     if ($job.job.result_payload.status -ne $ExpectedResultStatus) {
         throw (

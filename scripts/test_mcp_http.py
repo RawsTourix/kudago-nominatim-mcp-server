@@ -29,7 +29,9 @@ async def run(query: str, url: str) -> None:
             "movie_showings",
             "movies",
             "news",
+            "object",
             "places",
+            "reference",
             "resolve_place",
         } <= set(tool_names)
 
@@ -76,6 +78,16 @@ async def run(query: str, url: str) -> None:
             {"location": "msk", "page_size": 3, "lang": "ru"},
             timeout=60.0,
         )
+        reference_result = await client.call_tool(
+            "reference",
+            {"kind": "locations", "lang": "ru"},
+            timeout=60.0,
+        )
+        object_result = await client.call_tool(
+            "object",
+            {"object_type": "location", "object_id": "msk", "lang": "ru"},
+            timeout=60.0,
+        )
 
     print("RESOLVE_PLACE:")
     print_result(resolve_result.data)
@@ -108,6 +120,14 @@ async def run(query: str, url: str) -> None:
         assert result.data["tool"] == tool_name
         assert result.data["result_status"] == "ok"
         assert result.data["data"]["status"] == "ok"
+
+    for tool_name, result in (("reference", reference_result), ("object", object_result)):
+        print(f"{tool_name.upper()}:")
+        print_result(result.data)
+        assert isinstance(result.data, dict)
+        assert result.data["status"] == "ok"
+        assert result.data["tool"] == tool_name
+        assert result.data["result_status"] == "ok"
 
     for tool_name, result in (
         ("movies", movies_result),
