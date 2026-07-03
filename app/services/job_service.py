@@ -16,7 +16,7 @@ class JobService:
         self.job_repo = JobRepository(session)
         self.result_repo = ResultRepository(session)
 
-    async def create_job_from_api_request(
+    async def create_job_from_request(
         self,
         *,
         endpoint: str,
@@ -43,7 +43,7 @@ class JobService:
         await self.job_repo.add_event(
             job_id=job.id,
             event_type="queued",
-            message="Job created from API request",
+            message="Job created from request",
             data={
                 "endpoint": endpoint,
                 "method": method,
@@ -52,6 +52,25 @@ class JobService:
         )
 
         return job
+
+    async def create_job_from_api_request(
+        self,
+        *,
+        endpoint: str,
+        method: str,
+        command: str,
+        input_payload: dict[str, Any],
+        request_text: str | None = None,
+        client_request_id: str | None = None,
+    ) -> Job:
+        return await self.create_job_from_request(
+            endpoint=endpoint,
+            method=method,
+            command=command,
+            input_payload=input_payload,
+            request_text=request_text,
+            client_request_id=client_request_id,
+        )
 
     async def get_by_id(self, job_id: uuid.UUID) -> Job | None:
         return await self.job_repo.get_by_id(job_id)

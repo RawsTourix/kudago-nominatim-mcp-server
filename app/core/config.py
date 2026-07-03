@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "KudaGo FastAPI Service"
     debug: bool = False
+    database_echo: bool = False
 
     database_url: str
     redis_url: str = "redis://localhost:6379/0"

@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastmcp.utilities.lifespan import combine_lifespans
 
 from app.api.routers import (
     events,
@@ -17,6 +18,7 @@ from app.api.routers import (
 )
 from app.core.config import settings
 from app.core.redis import close_arq_pool, create_arq_pool
+from app.mcp.server import mcp
 
 
 @asynccontextmanager
@@ -28,9 +30,11 @@ async def lifespan(app: FastAPI):
         await close_arq_pool(app.state.arq_redis)
 
 
+mcp_app = mcp.http_app(path="/")
+
 app = FastAPI(
     title=settings.app_name,
-    lifespan=lifespan,
+    lifespan=combine_lifespans(lifespan, mcp_app.lifespan),
 )
 
 app.include_router(health.router, prefix="/api/v1")
@@ -44,6 +48,7 @@ app.include_router(movie_showings.router, prefix="/api/v1")
 app.include_router(movies.router, prefix="/api/v1")
 app.include_router(news.router, prefix="/api/v1")
 app.include_router(lists.router, prefix="/api/v1")
+app.mount("/mcp", mcp_app)
 
 
 @app.get("/")
