@@ -19,6 +19,19 @@ from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
 
 
+HANDLERS = {
+    GeoResolveHandler.command: GeoResolveHandler,
+    EventsSearchHandler.command: EventsSearchHandler,
+    PlacesSearchHandler.command: PlacesSearchHandler,
+    NewsSearchHandler.command: NewsSearchHandler,
+    ListsSearchHandler.command: ListsSearchHandler,
+    MoviesSearchHandler.command: MoviesSearchHandler,
+    MovieShowingsSearchHandler.command: MovieShowingsSearchHandler,
+    ReferenceHandler.command: ReferenceHandler,
+    ObjectDetailHandler.command: ObjectDetailHandler,
+}
+
+
 class CommandExecutor:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -128,37 +141,10 @@ class CommandExecutor:
         context: ExecutionContext,
         payload: dict[str, Any],
     ) -> CommandOutput:
-        if context.command == GeoResolveHandler.command:
-            return await GeoResolveHandler(self.session).run(context, payload)
-
-        if context.command == EventsSearchHandler.command:
-            return await EventsSearchHandler(self.session).run(context, payload)
-
-        if context.command == PlacesSearchHandler.command:
-            return await PlacesSearchHandler(self.session).run(context, payload)
-
-        if context.command == NewsSearchHandler.command:
-            return await NewsSearchHandler(self.session).run(context, payload)
-
-        if context.command == ListsSearchHandler.command:
-            return await ListsSearchHandler(self.session).run(context, payload)
-
-        if context.command == MoviesSearchHandler.command:
-            return await MoviesSearchHandler(self.session).run(context, payload)
-
-        if context.command == MovieShowingsSearchHandler.command:
-            return await MovieShowingsSearchHandler(self.session).run(
-                context,
-                payload,
-            )
-
-        if context.command == ReferenceHandler.command:
-            return await ReferenceHandler(self.session).run(context, payload)
-
-        if context.command == ObjectDetailHandler.command:
-            return await ObjectDetailHandler(self.session).run(context, payload)
-
-        raise ValueError(f"Unsupported command: {context.command}")
+        handler_cls = HANDLERS.get(context.command)
+        if handler_cls is None:
+            raise ValueError(f"Unsupported command: {context.command}")
+        return await handler_cls(self.session).run(context, payload)
 
     @staticmethod
     def _completed_output(

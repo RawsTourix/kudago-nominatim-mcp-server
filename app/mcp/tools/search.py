@@ -3,16 +3,14 @@ from typing import Any
 from fastmcp import FastMCP
 from pydantic import ValidationError
 
-from app.application.executor import CommandExecutor
-from app.core.db import AsyncSessionLocal
-from app.mcp.envelopes import mcp_error, mcp_ok
+from app.mcp.envelopes import mcp_error
+from app.mcp.executor import run_mcp_command
 from app.schemas.events import EventsSearchRequest
 from app.schemas.lists import ListsSearchRequest
 from app.schemas.movie_showings import MovieShowingsSearchRequest
 from app.schemas.movies import MoviesSearchRequest
 from app.schemas.news import NewsSearchRequest
 from app.schemas.places import PlacesSearchRequest
-from app.services.job_service import JobService
 
 
 def register_search_tools(mcp: FastMCP) -> None:
@@ -65,46 +63,12 @@ def register_search_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/events",
-                    method="MCP",
-                    command="events.search",
-                    input_payload=payload,
-                    request_text=request.place_query or request.location,
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="events.search",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/events",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            geo=output.result_payload.get("geo"),
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/events",
+            command="events.search",
+            payload=request.model_dump(),
+            request_text=request.place_query or request.location,
         )
 
     @mcp.tool(name="movies")
@@ -151,45 +115,12 @@ def register_search_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/movies",
-                    method="MCP",
-                    command="movies.search",
-                    input_payload=payload,
-                    request_text=request.place_query or request.location,
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="movies.search",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/movies",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            geo=output.result_payload.get("geo"),
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/movies",
+            command="movies.search",
+            payload=request.model_dump(),
+            request_text=request.place_query or request.location,
         )
 
     @mcp.tool(name="movie_showings")
@@ -232,45 +163,12 @@ def register_search_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/movie_showings",
-                    method="MCP",
-                    command="movie_showings.search",
-                    input_payload=payload,
-                    request_text=request.place_query or request.location,
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="movie_showings.search",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/movie_showings",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            geo=output.result_payload.get("geo"),
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/movie_showings",
+            command="movie_showings.search",
+            payload=request.model_dump(),
+            request_text=request.place_query or request.location,
         )
 
     @mcp.tool(name="news")
@@ -307,45 +205,12 @@ def register_search_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/news",
-                    method="MCP",
-                    command="news.search",
-                    input_payload=payload,
-                    request_text=request.place_query or request.location,
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="news.search",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/news",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            geo=output.result_payload.get("geo"),
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/news",
+            command="news.search",
+            payload=request.model_dump(),
+            request_text=request.place_query or request.location,
         )
 
     @mcp.tool(name="lists")
@@ -380,45 +245,12 @@ def register_search_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/lists",
-                    method="MCP",
-                    command="lists.search",
-                    input_payload=payload,
-                    request_text=request.place_query or request.location,
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="lists.search",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/lists",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            geo=output.result_payload.get("geo"),
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/lists",
+            command="lists.search",
+            payload=request.model_dump(),
+            request_text=request.place_query or request.location,
         )
 
     @mcp.tool(name="places")
@@ -468,44 +300,10 @@ def register_search_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/places",
-                    method="MCP",
-                    command="places.search",
-                    input_payload=payload,
-                    request_text=request.place_query or request.location,
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="places.search",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/places",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            geo=output.result_payload.get("geo"),
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/places",
+            command="places.search",
+            payload=request.model_dump(),
+            request_text=request.place_query or request.location,
         )

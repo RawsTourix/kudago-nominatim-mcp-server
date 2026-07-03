@@ -2,6 +2,16 @@
 
 ## Overview
 
+The service exposes the same application commands through two transports:
+
+- FastAPI REST under `/api/v1/*`; search commands are queued for an arq worker,
+  while reference and object GET endpoints remain synchronous and untracked;
+- FastMCP over streamable HTTP at `/mcp` or as a standalone stdio server.
+
+MCP commands execute inline, create jobs with method `MCP`, and persist command
+results, job events, and upstream-call diagnostics before returning a result.
+See [docs/mcp.md](docs/mcp.md) for the tool catalog and response envelope.
+
 Асинхронный FastAPI-сервис для поиска событий, мест, фильмов, киносеансов,
 новостей и подборок KudaGo. Названия населённых пунктов сопоставляются со
 справочником KudaGo, а при необходимости разрешаются через Nominatim.
@@ -225,6 +235,21 @@ GET /api/v1/jobs/{job_id}/upstream-calls
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1
+```
+
+Run the MCP checks after PostgreSQL is available and migrations are applied:
+
+```powershell
+python scripts/test_mcp_inmemory.py
+python scripts/test_mcp_stdio.py
+python scripts/test_mcp_http.py
+```
+
+The HTTP check expects the FastAPI application to be running. To launch only
+the stdio MCP transport for an MCP client, use:
+
+```powershell
+python -m app.mcp
 ```
 
 Другой адрес API можно передать параметром:

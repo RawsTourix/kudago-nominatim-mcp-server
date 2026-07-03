@@ -3,11 +3,9 @@ from typing import Any
 from fastmcp import FastMCP
 from pydantic import ValidationError
 
-from app.application.executor import CommandExecutor
-from app.core.db import AsyncSessionLocal
-from app.mcp.envelopes import mcp_error, mcp_ok
+from app.mcp.envelopes import mcp_error
+from app.mcp.executor import run_mcp_command
 from app.schemas.read_tools import ObjectDetailRequest, ReferenceGetRequest
-from app.services.job_service import JobService
 
 
 def register_read_tools(mcp: FastMCP) -> None:
@@ -32,44 +30,12 @@ def register_read_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/reference",
-                    method="MCP",
-                    command="reference.get",
-                    input_payload=payload,
-                    request_text=request.slug or request.kind,
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="reference.get",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/reference",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/reference",
+            command="reference.get",
+            payload=request.model_dump(),
+            request_text=request.slug or request.kind,
         )
 
     @mcp.tool(name="object")
@@ -102,42 +68,10 @@ def register_read_tools(mcp: FastMCP) -> None:
                 error_type=exc.__class__.__name__,
             )
 
-        payload = request.model_dump()
-        job = None
-        async with AsyncSessionLocal() as session:
-            try:
-                job = await JobService(session).create_job_from_request(
-                    endpoint="mcp://tools/object",
-                    method="MCP",
-                    command="object.detail",
-                    input_payload=payload,
-                    request_text=f"{request.object_type}:{request.object_id}",
-                )
-                output = await CommandExecutor(session).run_payload(
-                    job_id=job.id,
-                    command="object.detail",
-                    payload=payload,
-                    source="mcp",
-                    endpoint="mcp://tools/object",
-                )
-                await session.commit()
-            except Exception as exc:
-                if job is None:
-                    await session.rollback()
-                else:
-                    await session.commit()
-                return mcp_error(
-                    tool=tool_name,
-                    message=str(exc),
-                    error_type=exc.__class__.__name__,
-                    job_id=job.id if job is not None else None,
-                )
-
-        assert job is not None
-        return mcp_ok(
-            tool=tool_name,
-            job_id=job.id,
-            data=output.result_payload,
-            result_status=output.status,
-            meta=output.meta,
+        return await run_mcp_command(
+            tool_name=tool_name,
+            endpoint="mcp://tools/object",
+            command="object.detail",
+            payload=request.model_dump(),
+            request_text=f"{request.object_type}:{request.object_id}",
         )
