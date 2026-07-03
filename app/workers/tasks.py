@@ -12,7 +12,6 @@ from app.services.lists_service import ListsService
 from app.services.movie_showings_service import MovieShowingsService
 from app.services.movies_service import MoviesService
 from app.services.news_service import NewsService
-from app.services.places_service import PlacesService
 
 
 async def process_test_job(ctx, job_id: str) -> dict:
@@ -138,182 +137,30 @@ async def process_places_search_job(ctx, job_id: str) -> dict:
     parsed_job_id = UUID(job_id)
 
     async with AsyncSessionLocal() as session:
-        job_repo = JobRepository(session)
-        result_repo = ResultRepository(session)
-        location_resolver = LocationResolverService(session)
-        places_service = PlacesService(session)
-        job = await job_repo.get_by_id(parsed_job_id)
-
-        if job is None:
-            return {"status": "error", "message": "Job not found", "job_id": job_id}
-
-        if job.status == "succeeded":
-            return {
-                "status": "ok",
-                "message": "Job already succeeded",
-                "job_id": job_id,
-            }
+        executor = CommandExecutor(session)
 
         try:
-            await job_repo.mark_running(job)
-            await job_repo.add_event(
-                job_id=job.id,
-                event_type="started",
-                message="Places search job started",
-                data={"command": job.command},
-            )
-
-            payload = job.input_payload
-            lang = payload.get("lang") or settings.kudago_lang
-            place_query = payload.get("place_query")
-            resolved = await location_resolver.resolve_for_kudago_location_or_coordinates(
-                job_id=job.id,
-                place_query=place_query,
-                location=payload.get("location"),
-                lat=payload.get("lat"),
-                lon=payload.get("lon"),
-                radius=payload.get("radius"),
-                lang=lang,
-                allow_coordinates=True,
-            )
-            location = resolved["location"]
-            lat = resolved["lat"]
-            lon = resolved["lon"]
-            radius = resolved["radius"]
-            geo_meta = resolved["geo"]
-
-            if resolved["status"] != "ok":
-                result_status = resolved["status"]
-                result_payload = {
-                    "status": result_status,
-                    "message": "Geo resolution did not produce a usable result",
-                    "geo": geo_meta,
-                    "items": [],
-                    "count": 0,
-                    "returned": 0,
-                }
-                await result_repo.create(
-                    job_id=job.id,
-                    result_type="places.search",
-                    items=[],
-                    meta={"status": result_status, "geo": geo_meta},
-                )
-                await job_repo.mark_succeeded(job, result_payload=result_payload)
-                await job_repo.add_event(
-                    job_id=job.id,
-                    event_type="completed",
-                    message="Places search completed without KudaGo call",
-                    data={"status": result_status},
-                )
-                await session.commit()
-                return {
-                    "status": "ok",
-                    "job_id": job_id,
-                    "result_status": result_status,
-                }
-
-            showing_since = payload.get("showing_since")
-            showing_until = payload.get("showing_until")
-
-            if (
-                payload.get("has_showings") is True
-                and showing_since is None
-                and showing_until is None
-            ):
-                now = datetime.now(timezone.utc)
-                showing_since = int(now.timestamp())
-                showing_until = int((now + timedelta(days=7)).timestamp())
-
-                await job_repo.add_event(
-                    job_id=job.id,
-                    event_type="showing_window_defaulted",
-                    message=(
-                        "showing_since/showing_until were not provided, "
-                        "defaulted to next 7 days"
-                    ),
-                    data={
-                        "showing_since": showing_since,
-                        "showing_until": showing_until,
-                    },
-                )
-
-            filters = {
-                "categories": payload.get("categories"),
-                "tags": payload.get("tags"),
-                "has_showings": payload.get("has_showings"),
-                "showing_since": showing_since,
-                "showing_until": showing_until,
-            }
-            search_result = await places_service.search_places(
-                job_id=job.id,
-                location=location,
-                lat=lat,
-                lon=lon,
-                radius=radius,
-                categories=payload.get("categories"),
-                tags=payload.get("tags"),
-                has_showings=payload.get("has_showings"),
-                showing_since=showing_since,
-                showing_until=showing_until,
-                page=payload.get("page", 1),
-                page_size=payload.get("page_size", 10),
-                lang=lang,
-            )
-            items = search_result["items"]
-            result_payload = {
-                "status": "ok",
-                "source": "kudago",
-                "geo": geo_meta,
-                "filters": filters,
-                "count": search_result.get("count"),
-                "returned": search_result.get("returned"),
-                "items": items,
-            }
-            await result_repo.create(
-                job_id=job.id,
-                result_type="places.search",
-                items=items,
-                meta={
-                    "status": "ok",
-                    "source": "kudago",
-                    "geo": geo_meta,
-                    "filters": filters,
-                    "count": search_result.get("count"),
-                    "returned": search_result.get("returned"),
-                },
-            )
-            await job_repo.mark_succeeded(job, result_payload=result_payload)
-            await job_repo.add_event(
-                job_id=job.id,
-                event_type="completed",
-                message="Places search job completed",
-                data={
-                    "status": "ok",
-                    "returned": search_result.get("returned"),
-                    "count": search_result.get("count"),
-                },
+            output = await executor.run_existing_job(
+                parsed_job_id,
+                source="worker",
             )
             await session.commit()
+
             return {
                 "status": "ok",
                 "job_id": job_id,
-                "returned": search_result.get("returned"),
+                "result_status": output.status,
             }
-        except Exception as exc:
-            await job_repo.mark_failed(
-                job,
-                error_type=exc.__class__.__name__,
-                error_message=str(exc),
-            )
-            await job_repo.add_event(
-                job_id=job.id,
-                event_type="failed",
-                message="Places search job failed",
-                data={
-                    "error_type": exc.__class__.__name__,
-                    "error_message": str(exc),
-                },
-            )
+        except ValueError as exc:
+            if str(exc).startswith("Job not found:"):
+                return {
+                    "status": "error",
+                    "message": "Job not found",
+                    "job_id": job_id,
+                }
+            await session.commit()
+            raise
+        except Exception:
             await session.commit()
             raise
 

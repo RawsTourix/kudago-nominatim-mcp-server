@@ -1,20 +1,20 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.contracts import CommandEvent, CommandOutput, ExecutionContext
 from app.core.config import settings
-from app.services.events_service import EventsService
 from app.services.location_resolver_service import LocationResolverService
+from app.services.places_service import PlacesService
 
 
-class EventsSearchHandler:
-    command = "events.search"
+class PlacesSearchHandler:
+    command = "places.search"
 
     def __init__(self, session: AsyncSession):
-        self.events_service = EventsService(session)
         self.location_resolver = LocationResolverService(session)
+        self.places_service = PlacesService(session)
 
     async def run(
         self,
@@ -54,42 +54,49 @@ class EventsSearchHandler:
                 result_payload=result_payload,
             )
 
-        actual_since = payload.get("actual_since")
-        actual_until = payload.get("actual_until")
-        include_past = payload.get("include_past", False)
+        showing_since = payload.get("showing_since")
+        showing_until = payload.get("showing_until")
         events: list[CommandEvent] = []
-        if actual_since is None and not include_past:
-            actual_since = int(datetime.now(timezone.utc).timestamp())
+        if (
+            payload.get("has_showings") is True
+            and showing_since is None
+            and showing_until is None
+        ):
+            now = datetime.now(timezone.utc)
+            showing_since = int(now.timestamp())
+            showing_until = int((now + timedelta(days=7)).timestamp())
             events.append(
                 CommandEvent(
-                    event_type="actual_since_defaulted",
+                    event_type="showing_window_defaulted",
                     message=(
-                        "actual_since was not provided, defaulted to current UTC "
-                        "timestamp"
+                        "showing_since/showing_until were not provided, "
+                        "defaulted to next 7 days"
                     ),
-                    data={"actual_since": actual_since},
+                    data={
+                        "showing_since": showing_since,
+                        "showing_until": showing_until,
+                    },
                 )
             )
 
         filters = {
-            "actual_since": actual_since,
-            "actual_until": actual_until,
-            "include_past": include_past,
             "categories": payload.get("categories"),
             "tags": payload.get("tags"),
-            "is_free": payload.get("is_free"),
+            "has_showings": payload.get("has_showings"),
+            "showing_since": showing_since,
+            "showing_until": showing_until,
         }
-        search_result = await self.events_service.search_events(
+        search_result = await self.places_service.search_places(
             job_id=context.job_id,
             location=resolved["location"],
             lat=resolved["lat"],
             lon=resolved["lon"],
             radius=resolved["radius"],
-            actual_since=actual_since,
-            actual_until=actual_until,
             categories=payload.get("categories"),
             tags=payload.get("tags"),
-            is_free=payload.get("is_free"),
+            has_showings=payload.get("has_showings"),
+            showing_since=showing_since,
+            showing_until=showing_until,
             page=payload.get("page", 1),
             page_size=payload.get("page_size", 10),
             lang=lang,

@@ -4,7 +4,11 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.contracts import CommandOutput, ExecutionContext
-from app.application.handlers import EventsSearchHandler, GeoResolveHandler
+from app.application.handlers import (
+    EventsSearchHandler,
+    GeoResolveHandler,
+    PlacesSearchHandler,
+)
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
 
@@ -65,6 +69,14 @@ class CommandExecutor:
             )
 
             output = await self._dispatch(context, payload)
+            for event in output.events:
+                await self.job_repo.add_event(
+                    job_id=job.id,
+                    event_type=event.event_type,
+                    message=event.message,
+                    data=event.data,
+                )
+
             await self.result_repo.create(
                 job_id=job.id,
                 result_type=output.result_type,
@@ -115,6 +127,9 @@ class CommandExecutor:
 
         if context.command == EventsSearchHandler.command:
             return await EventsSearchHandler(self.session).run(context, payload)
+
+        if context.command == PlacesSearchHandler.command:
+            return await PlacesSearchHandler(self.session).run(context, payload)
 
         raise ValueError(f"Unsupported command: {context.command}")
 

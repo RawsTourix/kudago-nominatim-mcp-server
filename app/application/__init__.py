@@ -1,4 +1,9 @@
-from .contracts import CommandOutput, ExecutionContext
+from .contracts import CommandEvent, CommandOutput, ExecutionContext
 from .executor import CommandExecutor
 
-__all__ = ["CommandExecutor", "CommandOutput", "ExecutionContext"]
+__all__ = [
+    "CommandEvent",
+    "CommandExecutor",
+    "CommandOutput",
+    "ExecutionContext",
+]

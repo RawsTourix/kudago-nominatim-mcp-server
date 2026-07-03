@@ -114,3 +114,30 @@ async def test_events_handler_returns_geo_ambiguity_without_kudago_call():
         "returned": 0,
     }
     handler.events_service.search_events.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_events_handler_emits_actual_since_defaulted_event():
+    handler = make_handler(
+        resolved={
+            "status": "ok",
+            "location": "msk",
+            "lat": None,
+            "lon": None,
+            "radius": None,
+            "geo": {"status": "ok", "kind": "kudago_location"},
+        },
+        search_result={"count": 0, "returned": 0, "items": []},
+    )
+
+    output = await handler.run(
+        ExecutionContext(uuid4(), "events.search", "test"),
+        {"location": "msk", "lang": "ru"},
+    )
+
+    assert len(output.events) == 1
+    event = output.events[0]
+    assert event.event_type == "actual_since_defaulted"
+    assert event.data["actual_since"] == output.result_payload["filters"][
+        "actual_since"
+    ]

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.application.contracts import CommandOutput, ExecutionContext
+from app.application.contracts import CommandEvent, CommandOutput, ExecutionContext
 from app.application.executor import CommandExecutor
 from app.application.handlers.geo import GeoResolveHandler
 
@@ -64,6 +64,13 @@ async def test_executor_persists_success_lifecycle():
         items=[{"lat": "55.75", "lon": "37.62"}],
         meta={"status": "ok"},
         result_payload={"status": "ok", "candidates": []},
+        events=[
+            CommandEvent(
+                event_type="custom",
+                message="Custom handler event",
+                data={"value": 1},
+            )
+        ],
     )
     executor = CommandExecutor(SimpleNamespace())
     executor.job_repo = SimpleNamespace(
@@ -95,7 +102,13 @@ async def test_executor_persists_success_lifecycle():
         job,
         result_payload=output.result_payload,
     )
-    assert executor.job_repo.add_event.await_count == 2
+    assert executor.job_repo.add_event.await_count == 3
+    executor.job_repo.add_event.assert_any_await(
+        job_id=job.id,
+        event_type="custom",
+        message="Custom handler event",
+        data={"value": 1},
+    )
 
 
 @pytest.mark.asyncio

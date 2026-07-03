@@ -42,6 +42,12 @@ async def run(query: str, url: str) -> None:
             timeout=60.0,
         )
 
+        places_result = await client.call_tool(
+            "places",
+            {"location": "msk", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+
     print("RESOLVE_PLACE:")
     print_result(resolve_result.data)
     assert isinstance(resolve_result.data, dict)
@@ -56,6 +62,14 @@ async def run(query: str, url: str) -> None:
     assert events_result.data["tool"] == "events"
     assert events_result.data["result_status"] == "ok"
     assert events_result.data["data"]["status"] == "ok"
+
+    print("PLACES:")
+    print_result(places_result.data)
+    assert isinstance(places_result.data, dict)
+    assert places_result.data["status"] == "ok"
+    assert places_result.data["tool"] == "places"
+    assert places_result.data["result_status"] == "ok"
+    assert places_result.data["data"]["status"] == "ok"
 
 
 if __name__ == "__main__":

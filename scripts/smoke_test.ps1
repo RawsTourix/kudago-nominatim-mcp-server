@@ -147,6 +147,23 @@ $eventsAmbiguousJob = Test-Job `
     -Body @{ place_query = $nakhabino; page_size = 3; lang = "ru" } `
     -ExpectedResultStatus "geo_ambiguous"
 
+$placesCoordinatesJob = Test-Job `
+    -Name "places.search coordinates" `
+    -Url "$BaseUrl/places/search" `
+    -Body @{
+        lat = 55.751244
+        lon = 37.618423
+        radius = 5000
+        page_size = 3
+        lang = "ru"
+    }
+
+$placesAmbiguousJob = Test-Job `
+    -Name "places.search place_query=Nakhabino" `
+    -Url "$BaseUrl/places/search" `
+    -Body @{ place_query = $nakhabino; page_size = 3; lang = "ru" } `
+    -ExpectedResultStatus "geo_ambiguous"
+
 $movieShowingsJob = Test-Job `
     -Name "movie_showings.search location=msk" `
     -Url "$BaseUrl/movie-showings/search" `

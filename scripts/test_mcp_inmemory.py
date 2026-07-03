@@ -55,6 +55,18 @@ async def run(query: str) -> None:
             timeout=60.0,
         )
 
+        places_result = await client.call_tool(
+            "places",
+            {"location": "msk", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+
+        places_ambiguous_result = await client.call_tool(
+            "places",
+            {"place_query": "Нахабино", "page_size": 3, "lang": "ru"},
+            timeout=60.0,
+        )
+
     print("RESOLVE_PLACE:")
     print_result(resolve_result.data)
     assert isinstance(resolve_result.data, dict)
@@ -77,6 +89,21 @@ async def run(query: str) -> None:
     assert ambiguous_result.data["status"] == "ok"
     assert ambiguous_result.data["tool"] == "events"
     assert ambiguous_result.data["result_status"] == "geo_ambiguous"
+
+    print("PLACES:")
+    print_result(places_result.data)
+    assert isinstance(places_result.data, dict)
+    assert places_result.data["status"] == "ok"
+    assert places_result.data["tool"] == "places"
+    assert places_result.data["result_status"] == "ok"
+    assert places_result.data["data"]["status"] == "ok"
+
+    print("PLACES AMBIGUOUS:")
+    print_result(places_ambiguous_result.data)
+    assert isinstance(places_ambiguous_result.data, dict)
+    assert places_ambiguous_result.data["status"] == "ok"
+    assert places_ambiguous_result.data["tool"] == "places"
+    assert places_ambiguous_result.data["result_status"] == "geo_ambiguous"
 
 
 if __name__ == "__main__":
