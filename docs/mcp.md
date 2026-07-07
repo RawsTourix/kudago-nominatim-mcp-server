@@ -24,7 +24,11 @@ python -m app.mcp
 | `object` | Read an object detail | `object_type`, `object_id`, include flags | `object.detail` |
 
 `reference.kind` supports `event_categories`, `place_categories`, `locations`,
-and `location`. The latter requires `slug`.
+and `location`. The latter requires `slug`. `locations` lists official KudaGo
+slugs; it is not a whitelist of every searchable city. For another city,
+settlement, district, address, or landmark, pass the free-form name as
+`place_query` to `events` or `places`. Those tools check KudaGo locations first
+and can fall back to Nominatim coordinates.
 
 `object.object_type` supports `event`, `place`, `movie`, `movie_showing`,
 `news`, `list`, `agent`, `agent_role`, and `location`. Use `include_comments`

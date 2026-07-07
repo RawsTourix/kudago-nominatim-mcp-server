@@ -3,13 +3,16 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+ReferenceKind = Literal[
+    "event_categories",
+    "place_categories",
+    "locations",
+    "location",
+]
+
+
 class ReferenceGetRequest(BaseModel):
-    kind: Literal[
-        "event_categories",
-        "place_categories",
-        "locations",
-        "location",
-    ]
+    kind: ReferenceKind
     slug: str | None = Field(default=None, min_length=1, max_length=100)
     lang: str = "ru"
 

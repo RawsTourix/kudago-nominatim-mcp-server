@@ -7,6 +7,17 @@ from app.core.config import settings
 from app.services.reference_service import ReferenceService
 
 
+LOCATION_SEARCH_GUIDANCE = (
+    "The locations list contains official KudaGo slugs, not the complete set "
+    "of searchable places. Do not limit the user to these cities. For any "
+    "other city, town, district, address, or landmark, pass the user's text "
+    "as place_query to events or places; resolution checks KudaGo first and "
+    "falls back to Nominatim. Nominatim-only coordinates are supported by "
+    "events and places; movies, movie_showings, news, and lists still require "
+    "a KudaGo location or supported object ID."
+)
+
+
 class ReferenceHandler:
     command = "reference.get"
 
@@ -47,6 +58,9 @@ class ReferenceHandler:
             )
         else:
             raise ValueError(f"Unsupported reference kind: {kind}")
+
+        if kind == "locations":
+            result = {**result, "guidance": LOCATION_SEARCH_GUIDANCE}
 
         data = result.get("data")
         items = self._result_items(data)

@@ -23,6 +23,14 @@ async def test_first_application_tools_are_registered():
     } <= set(tools_by_name)
     assert "Use movie_showings" in tools_by_name["places"].description
     assert "actual cinema showings" in tools_by_name["movie_showings"].description
+    reference_tool = tools_by_name["reference"]
+    assert "not a complete" in reference_tool.description
+    assert reference_tool.inputSchema["properties"]["kind"]["enum"] == [
+        "event_categories",
+        "place_categories",
+        "locations",
+        "location",
+    ]
 
 
 @pytest.mark.asyncio

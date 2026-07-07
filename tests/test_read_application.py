@@ -6,7 +6,10 @@ import pytest
 
 from app.application.contracts import ExecutionContext
 from app.application.handlers.objects import ObjectDetailHandler
-from app.application.handlers.references import ReferenceHandler
+from app.application.handlers.references import (
+    LOCATION_SEARCH_GUIDANCE,
+    ReferenceHandler,
+)
 from app.integrations.kudago import KudaGoHttpClient
 from app.services.object_service import ObjectService
 from app.services.tracked_kudago_client import TrackedKudaGoHttpClient
@@ -33,6 +36,7 @@ async def test_reference_handler_returns_locations_as_items():
 
     assert output.status == "ok"
     assert output.items == [{"slug": "msk", "name": "Moscow"}]
+    assert output.result_payload["guidance"] == LOCATION_SEARCH_GUIDANCE
     handler.reference_service.get_locations.assert_awaited_once_with(
         lang="ru",
         job_id=job_id,
