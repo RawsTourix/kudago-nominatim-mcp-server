@@ -12,4 +12,6 @@ def test_command_registry_contains_all_supported_commands():
         "movie_showings.search",
         "reference.get",
         "object.detail",
+        "routing.transit.plan",
+        "routing.street.plan",
     }

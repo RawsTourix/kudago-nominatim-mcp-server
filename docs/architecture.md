@@ -12,7 +12,7 @@
 | `repositories` | asynchronous SQLAlchemy operations |
 | `models` | PostgreSQL tables |
 | `workers` | arq background jobs |
-| `integrations` | KudaGo and Nominatim HTTP clients |
+| `integrations` | independent KudaGo, Nominatim, Transitous and OpenRouteService HTTP clients |
 | `core` | configuration, database engine and Redis pool |
 
 ## Queued Command Flow
@@ -75,6 +75,13 @@ MCP client
 The shared command layer keeps transport-specific code limited to validation,
 job submission/execution mode, and response mapping.
 
+Routing follows the same split. REST endpoints enqueue
+`routing.transit.plan` or `routing.street.plan`; MCP tools execute those exact
+commands inline. `TransitRoutingService` and `StreetRoutingService` normalize
+provider responses and write `upstream_calls`, while `CommandExecutor` owns the
+common job, result and event lifecycle. Neither routing service invokes the
+other and neither performs geocoding.
+
 ## Synchronous Reads
 
 REST reference and object-detail GET endpoints intentionally remain direct,
@@ -116,9 +123,9 @@ KudaGo location slug или подходящий ID объекта.
 
 ## Result Strategy
 
-`GET /jobs/{id}` возвращает компактный `result_payload`: массив `items`
-заменяется на `items_hidden`, `items_count` и подсказку. Полный результат
-доступен через `/results` или `?include_result=true`.
+`GET /jobs/{id}` возвращает компактный `result_payload`: массивы `items` и
+`routes` заменяются на count/hidden-поля и подсказку. Полный результат доступен
+через `/results` или `?include_result=true`.
 
 ## Failure Model
 
@@ -128,3 +135,7 @@ KudaGo location slug или подходящий ID объекта.
   job получает `succeeded`, а `result_payload.status` объясняет ограничение.
 - Кэшированные geo results не появляются в upstream calls, потому что внешнего
   HTTP-вызова в этом случае нет.
+- `no_route` and explicit `coverage_unavailable` are completed domain results,
+  so the job is `succeeded`. Timeouts, transport failures, HTTP 429/5xx,
+  invalid provider responses and ORS configuration failures make the job
+  `failed`.

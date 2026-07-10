@@ -7,6 +7,8 @@ from .news import NewsSearchHandler
 from .objects import ObjectDetailHandler
 from .places import PlacesSearchHandler
 from .references import ReferenceHandler
+from .street_routing import StreetRoutingHandler
+from .transit_routing import TransitRoutingHandler
 
 __all__ = [
     "EventsSearchHandler",
@@ -18,4 +20,6 @@ __all__ = [
     "ObjectDetailHandler",
     "PlacesSearchHandler",
     "ReferenceHandler",
+    "StreetRoutingHandler",
+    "TransitRoutingHandler",
 ]

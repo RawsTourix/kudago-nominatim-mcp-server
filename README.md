@@ -15,6 +15,8 @@ See [docs/mcp.md](docs/mcp.md) for the tool catalog and response envelope.
 Асинхронный FastAPI-сервис для поиска событий, мест, фильмов, киносеансов,
 новостей и подборок KudaGo. Названия населённых пунктов сопоставляются со
 справочником KudaGo, а при необходимости разрешаются через Nominatim.
+Transitous предоставляет маршруты общественного транспорта, а
+OpenRouteService — маршруты пешком, на велосипеде и на автомобиле.
 
 Длительные операции оформляются как jobs: API сохраняет задачу в PostgreSQL,
 помещает её в Redis, а отдельный arq worker выполняет внешние запросы и сохраняет
@@ -26,7 +28,8 @@ See [docs/mcp.md](docs/mcp.md) for the tool catalog and response envelope.
 - FastAPI HTTP API и автоматическая OpenAPI-документация;
 - PostgreSQL и асинхронный SQLAlchemy;
 - Redis и arq для фоновых задач;
-- интеграции с KudaGo и Nominatim;
+- интеграции с KudaGo, Nominatim, Transitous и OpenRouteService;
+- независимые public-transit и walking/cycling/driving routing commands;
 - кэширование результатов геокодирования;
 - история событий job и журнал внешних HTTP-вызовов;
 - компактное получение статуса и отдельная выдача полных результатов;
@@ -56,7 +59,7 @@ app/
   application/     shared command executor, contracts and handlers
   api/             HTTP dependencies and routers
   core/            configuration, PostgreSQL and Redis
-  integrations/    KudaGo and Nominatim clients
+  integrations/    KudaGo, Nominatim and routing provider clients
   mcp/             FastMCP server, execution helper and tools
   models/          SQLAlchemy models
   repositories/    database access
@@ -119,6 +122,13 @@ Copy-Item .env.example .env
 | `NOMINATIM_MIN_INTERVAL_SECONDS` | минимальный интервал между запросами |
 | `NOMINATIM_COUNTRYCODES` | ограничение поиска по странам |
 | `DEFAULT_RADIUS` | радиус геопоиска по умолчанию, метры |
+| `TRANSITOUS_BASE_URL` | базовый URL Transitous / MOTIS 2 |
+| `TRANSITOUS_USER_AGENT` | имя приложения, версия и контакт для Transitous |
+| `TRANSITOUS_TIMEOUT_SECONDS` | timeout Transitous routing |
+| `OPENROUTESERVICE_BASE_URL` | базовый URL OpenRouteService |
+| `OPENROUTESERVICE_API_KEY` | API key; требуется только при вызове street routing |
+| `OPENROUTESERVICE_USER_AGENT` | User-Agent OpenRouteService |
+| `OPENROUTESERVICE_TIMEOUT_SECONDS` | timeout OpenRouteService directions |
 
 Не коммитьте `.env` с реальными учётными данными.
 
@@ -203,10 +213,17 @@ alembic revision --autogenerate -m "describe change"
 | `POST` | `/api/v1/movie-showings/search` | поиск киносеансов |
 | `POST` | `/api/v1/news/search` | поиск новостей |
 | `POST` | `/api/v1/lists/search` | поиск подборок |
+| `POST` | `/api/v1/routing/transit` | общественный транспорт через Transitous |
+| `POST` | `/api/v1/routing/street` | пешком, велосипед или автомобиль через OpenRouteService |
 | `GET` | `/api/v1/objects/{type}/{id}` | полная карточка объекта |
 | `GET` | `/api/v1/references/*` | справочники KudaGo |
 
 Полная таблица: [docs/api.md](docs/api.md).
+
+Маршрутизация принимает только координаты. Если известен адрес или название,
+сначала используйте `resolve_place`, затем передайте выбранные координаты в
+`transit_route` либо `street_route`. Подробные контракты и ограничения описаны
+в [docs/routing.md](docs/routing.md).
 
 ## Jobs Lifecycle
 
@@ -268,6 +285,8 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1 `
   даже с ограниченным временным диапазоном. Для киносеансов используйте
   `/api/v1/movie-showings/search`.
 - Надёжность и полнота данных зависят от внешних KudaGo и Nominatim API.
+- Transitous работает best-effort и не гарантирует покрытие или realtime-данные
+  для каждого региона. `no_route` не доказывает отсутствие транспорта вообще.
 - Debug endpoint `/jobs/{id}/upstream-calls` возвращает сохранённые upstream
   payloads без отдельной авторизации; перед публичным развёртыванием его нужно
   защитить или отключить.

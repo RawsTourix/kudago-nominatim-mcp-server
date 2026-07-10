@@ -24,6 +24,8 @@ Base path: `/api/v1`.
 | `POST` | `/movie-showings/search` | location, movie/place IDs, dates, `is_free` |
 | `POST` | `/news/search` | location, tags, `actual_only` |
 | `POST` | `/lists/search` | location, tags |
+| `POST` | `/routing/transit` | coordinate pair, time and transit constraints |
+| `POST` | `/routing/street` | coordinate pair, walking/cycling/driving profile |
 
 Search-команды принимают `location` как KudaGo slug либо `place_query` как
 человекочитаемое название. Events и places также поддерживают полный набор
@@ -78,6 +80,50 @@ Content-Type: application/json
 ```http
 GET /api/v1/objects/place/1470?lang=ru
 ```
+
+### Routing
+
+Оба routing endpoint принимают координаты и создают queued jobs. Они не
+геокодируют адреса и не вызывают друг друга.
+
+```http
+POST /api/v1/routing/transit
+Content-Type: application/json
+```
+
+```json
+{
+  "origin_lat": 52.5200,
+  "origin_lon": 13.4050,
+  "destination_lat": 52.5100,
+  "destination_lon": 13.3900,
+  "time": "2026-07-12T18:40:00+02:00",
+  "arrive_by": false,
+  "transit_modes": ["SUBWAY", "BUS"],
+  "num_itineraries": 3
+}
+```
+
+```http
+POST /api/v1/routing/street
+Content-Type: application/json
+```
+
+```json
+{
+  "origin_lat": 55.842,
+  "origin_lon": 37.180,
+  "destination_lat": 55.850,
+  "destination_lon": 37.195,
+  "profile": "walking",
+  "include_instructions": true,
+  "include_geometry": false
+}
+```
+
+Допустимые street profiles: `walking`, `cycling`, `driving`. Provider-specific
+имена вроде `foot-walking` во внешний контракт не входят. Полные normalized
+result contracts описаны в [routing.md](routing.md).
 
 ## Jobs
 
@@ -140,5 +186,7 @@ location
 | `ambiguous` / `geo_ambiguous` | найдено несколько geo candidates |
 | `geo_not_found` | место не найдено |
 | `geo_unsupported` | endpoint не поддерживает найденные координаты |
+| `no_route` | provider корректно ответил, но маршрут не найден |
+| `coverage_unavailable` | provider явно сообщил об отсутствии данных покрытия |
 
 Для точных request/response schemas используйте OpenAPI `/docs`.

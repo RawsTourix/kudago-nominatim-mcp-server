@@ -80,3 +80,21 @@ class QueueService:
             _job_id=queue_job_id,
         )
         return job.job_id if job is not None else None
+
+    async def enqueue_transit_routing_job(self, job_id: UUID) -> str | None:
+        queue_job_id = f"routing.transit.plan:{job_id}"
+        job = await self.redis.enqueue_job(
+            "process_transit_routing_job",
+            str(job_id),
+            _job_id=queue_job_id,
+        )
+        return job.job_id if job is not None else None
+
+    async def enqueue_street_routing_job(self, job_id: UUID) -> str | None:
+        queue_job_id = f"routing.street.plan:{job_id}"
+        job = await self.redis.enqueue_job(
+            "process_street_routing_job",
+            str(job_id),
+            _job_id=queue_job_id,
+        )
+        return job.job_id if job is not None else None

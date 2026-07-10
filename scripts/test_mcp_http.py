@@ -33,6 +33,8 @@ async def run(query: str, url: str) -> None:
             "places",
             "reference",
             "resolve_place",
+            "street_route",
+            "transit_route",
         } <= set(tool_names)
 
         resolve_result = await client.call_tool(

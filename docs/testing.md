@@ -61,6 +61,19 @@ Each script verifies `ping`, tool discovery, all search tools, `reference`,
 `geo_ambiguous` results and opens the first returned event when available. The
 scripts print `job_id` values for the diagnostics check.
 
+Routing unit tests use `httpx.MockTransport`, injected clients and
+`AsyncMock`; they do not access Transitous or OpenRouteService over the network.
+Optional live provider checks are separate:
+
+```powershell
+python scripts/test_routing_live.py
+```
+
+The script requires a Transitous User-Agent containing application name,
+version and contact. OpenRouteService cases are skipped with a clear message
+when `OPENROUTESERVICE_API_KEY` is empty. Live checks are never part of normal
+`pytest`.
+
 ## 4. Persisted diagnostics
 
 Use the printed MCP `job_id` while the FastAPI application is running:

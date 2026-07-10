@@ -38,16 +38,22 @@ def compact_result_payload(
     if not isinstance(payload, dict):
         return payload
 
-    if "items" not in payload or not isinstance(payload["items"], list):
-        return payload
-
     compact = dict(payload)
-    items = compact.pop("items")
-    compact["items_hidden"] = True
-    compact["items_count"] = len(items)
-    compact["items_hint"] = (
-        "Use /api/v1/jobs/{job_id}/results to fetch stored result items."
-    )
+    if isinstance(compact.get("items"), list):
+        items = compact.pop("items")
+        compact["items_hidden"] = True
+        compact["items_count"] = len(items)
+        compact["items_hint"] = (
+            "Use /api/v1/jobs/{job_id}/results to fetch stored result items."
+        )
+    if isinstance(compact.get("routes"), list):
+        routes = compact.pop("routes")
+        compact["routes_hidden"] = True
+        compact["routes_count"] = len(routes)
+        compact["routes_hint"] = (
+            "Use /api/v1/jobs/{job_id}/results or include_result=true to fetch "
+            "full routes."
+        )
     return compact
 
 

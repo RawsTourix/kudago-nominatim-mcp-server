@@ -15,6 +15,7 @@ from app.api.routers import (
     objects,
     places,
     references,
+    routing,
 )
 from app.core.config import settings
 from app.core.redis import close_arq_pool, create_arq_pool
@@ -48,6 +49,7 @@ app.include_router(movie_showings.router, prefix="/api/v1")
 app.include_router(movies.router, prefix="/api/v1")
 app.include_router(news.router, prefix="/api/v1")
 app.include_router(lists.router, prefix="/api/v1")
+app.include_router(routing.router, prefix="/api/v1")
 app.mount("/mcp", mcp_app)
 
 

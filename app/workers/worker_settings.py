@@ -7,7 +7,9 @@ from app.workers.tasks import (
     process_movies_search_job,
     process_news_search_job,
     process_places_search_job,
+    process_street_routing_job,
     process_test_job,
+    process_transit_routing_job,
 )
 
 
@@ -21,6 +23,8 @@ class WorkerSettings:
         process_movie_showings_search_job,
         process_movies_search_job,
         process_news_search_job,
+        process_transit_routing_job,
+        process_street_routing_job,
     ]
 
     redis_settings = get_redis_settings()

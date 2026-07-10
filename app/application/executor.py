@@ -14,6 +14,8 @@ from app.application.handlers import (
     ObjectDetailHandler,
     PlacesSearchHandler,
     ReferenceHandler,
+    StreetRoutingHandler,
+    TransitRoutingHandler,
 )
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
@@ -29,6 +31,8 @@ HANDLERS = {
     MovieShowingsSearchHandler.command: MovieShowingsSearchHandler,
     ReferenceHandler.command: ReferenceHandler,
     ObjectDetailHandler.command: ObjectDetailHandler,
+    TransitRoutingHandler.command: TransitRoutingHandler,
+    StreetRoutingHandler.command: StreetRoutingHandler,
 }
 
 
@@ -152,6 +156,8 @@ class CommandExecutor:
         result_payload: dict[str, Any],
     ) -> CommandOutput:
         items = result_payload.get("items")
+        if not isinstance(items, list):
+            items = result_payload.get("routes")
         if not isinstance(items, list):
             items = result_payload.get("candidates", [])
 

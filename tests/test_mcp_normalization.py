@@ -88,3 +88,45 @@ def test_geo_resolve_candidates_are_compacted_in_data():
             "lon": "2",
         }
     ]
+
+
+def test_routing_geometry_and_provider_debug_are_removed_without_mutation():
+    result_payload = {
+        "status": "ok",
+        "provider": "openrouteservice",
+        "routes": [
+            {
+                "distance_meters": 100,
+                "geometry": "encoded-polyline",
+                "segments": [
+                    {
+                        "steps": [
+                            {
+                                "instruction": "Turn left",
+                                "name": "Main Street",
+                            }
+                        ]
+                    }
+                ],
+                "raw_response": {"provider": "debug"},
+            }
+        ],
+        "warnings": ["limited coverage"],
+        "attribution": [{"name": "openrouteservice.org"}],
+        "debugOutput": {"search_time": 1},
+        "requestParameters": {"api_key": "must-not-leak"},
+    }
+    original = deepcopy(result_payload)
+
+    compact = compact_mcp_data(result_payload)
+
+    route = compact["routes"][0]
+    assert "geometry" not in route
+    assert route["geometry_hidden"] is True
+    assert "raw_response" not in route
+    assert route["segments"][0]["steps"][0]["instruction"] == "Turn left"
+    assert compact["warnings"] == ["limited coverage"]
+    assert compact["attribution"] == [{"name": "openrouteservice.org"}]
+    assert "debugOutput" not in compact
+    assert "requestParameters" not in compact
+    assert result_payload == original

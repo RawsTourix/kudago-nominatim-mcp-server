@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     nominatim_countrycodes: str = "ru"
     default_radius: int = 50_000
 
+    transitous_base_url: str = "https://api.transitous.org/"
+    transitous_user_agent: str
+    transitous_timeout_seconds: float = 40.0
+
+    openrouteservice_base_url: str = "https://api.openrouteservice.org/"
+    openrouteservice_api_key: str | None = None
+    openrouteservice_user_agent: str
+    openrouteservice_timeout_seconds: float = 30.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

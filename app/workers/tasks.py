@@ -283,3 +283,63 @@ async def process_lists_search_job(ctx, job_id: str) -> dict:
         except Exception:
             await session.commit()
             raise
+
+
+async def process_transit_routing_job(ctx, job_id: str) -> dict:
+    parsed_job_id = UUID(job_id)
+
+    async with AsyncSessionLocal() as session:
+        executor = CommandExecutor(session)
+        try:
+            output = await executor.run_existing_job(
+                parsed_job_id,
+                source="worker",
+            )
+            await session.commit()
+            return {
+                "status": "ok",
+                "job_id": job_id,
+                "result_status": output.status,
+            }
+        except ValueError as exc:
+            if str(exc).startswith("Job not found:"):
+                return {
+                    "status": "error",
+                    "message": "Job not found",
+                    "job_id": job_id,
+                }
+            await session.commit()
+            raise
+        except Exception:
+            await session.commit()
+            raise
+
+
+async def process_street_routing_job(ctx, job_id: str) -> dict:
+    parsed_job_id = UUID(job_id)
+
+    async with AsyncSessionLocal() as session:
+        executor = CommandExecutor(session)
+        try:
+            output = await executor.run_existing_job(
+                parsed_job_id,
+                source="worker",
+            )
+            await session.commit()
+            return {
+                "status": "ok",
+                "job_id": job_id,
+                "result_status": output.status,
+            }
+        except ValueError as exc:
+            if str(exc).startswith("Job not found:"):
+                return {
+                    "status": "error",
+                    "message": "Job not found",
+                    "job_id": job_id,
+                }
+            await session.commit()
+            raise
+        except Exception:
+            await session.commit()
+            raise
