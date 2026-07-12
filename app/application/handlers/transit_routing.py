@@ -38,12 +38,12 @@ def _routing_output(command: str, result: dict[str, Any]) -> CommandOutput:
         CommandEvent(
             event_type=(
                 "routing_no_route"
-                if status in {"no_route", "coverage_unavailable"}
+                if status == "no_route"
                 else "routing_result_received"
             ),
             message=(
                 "Transit routing returned no confirmed route"
-                if status in {"no_route", "coverage_unavailable"}
+                if status == "no_route"
                 else "Transit routing result was received"
             ),
             data={"status": status, "returned": result["returned"]},

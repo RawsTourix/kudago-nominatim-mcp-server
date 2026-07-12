@@ -18,6 +18,16 @@ from app.integrations.transitous import TransitousHttpClient, plan_journey
 
 BERLIN_ALEXANDERPLATZ = (52.5219, 13.4132)
 BERLIN_HAUPTBAHNHOF = (52.5251, 13.3694)
+SAFE_TRANSIT_MODES = [
+    "TRAM",
+    "SUBWAY",
+    "FERRY",
+    "BUS",
+    "COACH",
+    "RAIL",
+    "FUNICULAR",
+    "AERIAL_LIFT",
+]
 
 
 async def run_transitous() -> None:
@@ -32,8 +42,8 @@ async def run_transitous() -> None:
     origin = f"{BERLIN_ALEXANDERPLATZ[0]},{BERLIN_ALEXANDERPLATZ[1]}"
     destination = f"{BERLIN_HAUPTBAHNHOF[0]},{BERLIN_HAUPTBAHNHOF[1]}"
     scenarios = [
-        ("transit-default", False, ["TRANSIT"]),
-        ("transit-arrive-by", True, ["TRANSIT"]),
+        ("transit-default", False, SAFE_TRANSIT_MODES),
+        ("transit-arrive-by", True, SAFE_TRANSIT_MODES),
         ("transit-restricted", False, ["SUBURBAN", "SUBWAY", "BUS"]),
     ]
 

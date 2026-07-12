@@ -30,9 +30,11 @@ stations, line numbers, transfers or schedules from a street route.
 Transit results contain a stable `query`, `routes`, `warnings` and
 `attribution`. Every itinerary includes departure/arrival time, duration,
 transfer count, realtime/cancellation flags, and normalized legs. Leg facts
-such as stop names, line names, headsign, agency and scheduled/realtime times
-are copied only when the provider supplied them. Geometry, MOTIS debug output,
-page cursors and raw request parameters are not exposed.
+such as stop IDs, tracks, pickup/dropoff rules, alerts, line names, headsign,
+agency and scheduled/realtime times are copied only when the provider supplied
+them. Stop alerts, platform changes and cancellations are deduplicated into
+route and result warnings. Geometry, MOTIS debug output, page cursors and raw
+request parameters are not exposed.
 
 Street results contain the external profile (`walking`, `cycling` or
 `driving`), route distance/duration, bbox, segments and optional steps. The
@@ -53,20 +55,24 @@ GET /api/v1/jobs/{job_id}?include_result=true
 |---|---|---|
 | `ok` | provider returned at least one normalized route | `succeeded` |
 | `no_route` | provider returned no route for this query | `succeeded` |
-| `coverage_unavailable` | provider explicitly reported missing coverage/data | `succeeded` |
 | execution error | timeout, network/DNS, HTTP 429/5xx, invalid response or configuration failure | `failed` |
 
-OpenRouteService HTTP 404 and routing errors `2009`/`2016` are normalized as
-`no_route`; other provider errors are not hidden. A `no_route` result is not
-proof that transport does not exist—it only describes this provider query.
+Only OpenRouteService routing error codes `2009` and `2016` are normalized as
+`no_route`; a bare HTTP 404 can also mean an unavailable endpoint and remains
+an execution error. MOTIS v6 does not provide a structured coverage signal.
+A `no_route` result is not proof that transport does not exist—it only
+describes this provider query.
 
 ## Provider requirements
 
 Transitous is a community best-effort service. Coverage and realtime data are
-not guaranteed. Every request sends `TRANSITOUS_USER_AGENT`; Transitous asks it
-to contain the application name, client version and a contact email or website.
-Results include links to the Transitous data sources and OpenStreetMap
-attribution.
+not guaranteed. The service can start without `TRANSITOUS_USER_AGENT`, but a
+transit routing call then fails with a configuration error. Transitous asks the
+header to contain the application name, client version and a contact email or
+website. Results include links to the Transitous data sources and OpenStreetMap
+attribution. An omitted `transit_modes` (or the compatibility alias `TRANSIT`)
+expands to an explicit safe set and does not enable airplane, ODM, ride-sharing
+or unknown modes.
 
 OpenRouteService requires `OPENROUTESERVICE_API_KEY` only when `street_route` is
 called. The key is sent in the authorization header and is never written to

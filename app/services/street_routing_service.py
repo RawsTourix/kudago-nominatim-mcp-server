@@ -270,11 +270,9 @@ def _street_query(request: StreetRouteRequest) -> dict[str, Any]:
 
 
 def _is_no_route_error(exc: OpenRouteServiceResponseError) -> bool:
-    if exc.status_code == 404:
-        return True
-    return exc.status_code in {400, 422} and _provider_error_code(
-        exc.response_payload
-    ) in NO_ROUTE_CODES
+    if exc.status_code == 429 or exc.status_code >= 500:
+        return False
+    return _provider_error_code(exc.response_payload) in NO_ROUTE_CODES
 
 
 def _provider_error_code(payload: Any) -> int | None:

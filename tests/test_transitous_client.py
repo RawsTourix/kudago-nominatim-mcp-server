@@ -4,12 +4,18 @@ import httpx
 import pytest
 
 from app.integrations.transitous import (
+    TransitousConfigurationError,
     TransitousHttpClient,
     TransitousInvalidResponseError,
     TransitousResponseError,
     TransitousTransportError,
     plan_journey,
 )
+
+
+def test_transitous_client_requires_user_agent_only_when_constructed():
+    with pytest.raises(TransitousConfigurationError, match="USER_AGENT"):
+        TransitousHttpClient(user_agent=None, trust_env=False)
 
 
 @pytest.mark.asyncio

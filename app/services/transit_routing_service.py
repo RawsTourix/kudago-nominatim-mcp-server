@@ -1,4 +1,6 @@
+import json
 import time
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -27,6 +29,17 @@ TRANSITOUS_ATTRIBUTION = [
     },
 ]
 
+DEFAULT_TRANSIT_MODES = (
+    TransitMode.TRAM,
+    TransitMode.SUBWAY,
+    TransitMode.FERRY,
+    TransitMode.BUS,
+    TransitMode.COACH,
+    TransitMode.RAIL,
+    TransitMode.FUNICULAR,
+    TransitMode.AERIAL_LIFT,
+)
+
 
 class TransitRoutingService:
     def __init__(
@@ -44,10 +57,7 @@ class TransitRoutingService:
         job_id: UUID,
         request: TransitRouteRequest,
     ) -> dict[str, Any]:
-        transit_modes = [
-            mode.value
-            for mode in (request.transit_modes or [TransitMode.TRANSIT])
-        ]
+        transit_modes = _effective_transit_modes(request)
         from_place = _coordinate_pair(request.origin_lat, request.origin_lon)
         to_place = _coordinate_pair(
             request.destination_lat,
@@ -111,18 +121,6 @@ class TransitRoutingService:
                 error_type=exc.__class__.__name__,
                 error_message=str(exc),
             )
-            if (
-                isinstance(exc, TransitousResponseError)
-                and 400 <= exc.status_code < 500
-                and exc.status_code != 429
-                and isinstance(exc.response_payload, dict)
-                and _explicit_coverage_unavailable(exc.response_payload)
-            ):
-                return _coverage_unavailable_result(
-                    request,
-                    transit_modes,
-                    _list_value(exc.response_payload.get("warnings")),
-                )
             raise
         finally:
             if self.client is None:
@@ -166,14 +164,6 @@ class TransitRoutingService:
         transit_modes: list[str],
     ) -> dict[str, Any]:
         query = _transit_query(request, transit_modes)
-        warnings = _list_value(raw.get("warnings"))
-
-        if _explicit_coverage_unavailable(raw):
-            return _coverage_unavailable_result(
-                request,
-                transit_modes,
-                warnings,
-            )
 
         itineraries = raw.get("itineraries")
         if not isinstance(itineraries, list):
@@ -202,10 +192,15 @@ class TransitRoutingService:
                     "No public transport route was found for the selected "
                     "points and time."
                 ),
-                "warnings": warnings,
+                "warnings": [],
                 "attribution": TRANSITOUS_ATTRIBUTION,
             }
 
+        warnings = _deduplicate_warnings(
+            warning
+            for route in routes
+            for warning in route["warnings"]
+        )
         return {
             "status": "ok",
             "provider": "transitous",
@@ -233,6 +228,13 @@ def _transit_query(
     }
 
 
+def _effective_transit_modes(request: TransitRouteRequest) -> list[str]:
+    requested = request.transit_modes
+    if requested is None or requested == [TransitMode.TRANSIT]:
+        return [mode.value for mode in DEFAULT_TRANSIT_MODES]
+    return [mode.value for mode in requested]
+
+
 def _normalize_itinerary(itinerary: dict[str, Any]) -> dict[str, Any]:
     raw_legs = itinerary.get("legs")
     if raw_legs is None:
@@ -245,15 +247,17 @@ def _normalize_itinerary(itinerary: dict[str, Any]) -> dict[str, Any]:
         )
 
     legs = [_normalize_leg(leg) for leg in raw_legs]
+    warnings = _deduplicate_warnings(
+        warning for leg in legs for warning in _place_warnings_for_leg(leg)
+    )
     return {
         "departure_time": _iso_time(itinerary.get("startTime")),
         "arrival_time": _iso_time(itinerary.get("endTime")),
         "duration_seconds": _number(itinerary.get("duration")),
         "transfers": _integer(itinerary.get("transfers")),
         "has_realtime_data": any(leg.get("realtime") is True for leg in legs),
-        "has_cancellations": any(
-            leg.get("cancelled") is True for leg in legs
-        ),
+        "has_cancellations": any(_leg_has_cancellations(leg) for leg in legs),
+        "warnings": warnings,
         "legs": legs,
     }
 
@@ -262,10 +266,22 @@ def _normalize_leg(leg: dict[str, Any]) -> dict[str, Any]:
     cancelled = _optional_bool(leg.get("cancelled"))
     if leg.get("tripCancelled") is True:
         cancelled = True
+    intermediate_stops = leg.get("intermediateStops")
+    if intermediate_stops is None:
+        intermediate_stops = []
+    if not isinstance(intermediate_stops, list) or not all(
+        isinstance(stop, dict) for stop in intermediate_stops
+    ):
+        raise TransitousInvalidResponseError(
+            "Transitous intermediateStops must be an array of objects"
+        )
     return {
         "mode": _text(leg.get("mode")),
         "from": _normalize_place(leg.get("from")),
         "to": _normalize_place(leg.get("to")),
+        "intermediate_stops": [
+            _normalize_place(stop) for stop in intermediate_stops
+        ],
         "departure_time": _iso_time(leg.get("startTime")),
         "arrival_time": _iso_time(leg.get("endTime")),
         "scheduled_departure_time": _iso_time(leg.get("scheduledStartTime")),
@@ -286,41 +302,99 @@ def _normalize_leg(leg: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_place(value: Any) -> dict[str, Any]:
     place = value if isinstance(value, dict) else {}
+    alerts = place.get("alerts")
+    if alerts is None:
+        alerts = []
+    if not isinstance(alerts, list) or not all(
+        isinstance(alert, dict) for alert in alerts
+    ):
+        raise TransitousInvalidResponseError(
+            "Transitous place alerts must be an array of objects"
+        )
     return {
         "name": _text(place.get("name")),
         "lat": _number(place.get("lat")),
         "lon": _number(place.get("lon")),
+        "stop_id": _text(place.get("stopId")),
+        "track": _text(place.get("track")),
+        "scheduled_track": _text(place.get("scheduledTrack")),
+        "cancelled": _optional_bool(place.get("cancelled")),
+        "pickup_type": _text(place.get("pickupType")),
+        "dropoff_type": _text(place.get("dropoffType")),
+        "alerts": [_normalize_alert(alert) for alert in alerts],
     }
 
 
-def _explicit_coverage_unavailable(raw: dict[str, Any]) -> bool:
-    if raw.get("status") == "coverage_unavailable":
-        return True
-    error = raw.get("error")
-    return isinstance(error, dict) and error.get("code") in {
-        "NO_COVERAGE",
-        "COVERAGE_UNAVAILABLE",
-    }
-
-
-def _coverage_unavailable_result(
-    request: TransitRouteRequest,
-    transit_modes: list[str],
-    warnings: list[Any],
-) -> dict[str, Any]:
+def _normalize_alert(alert: dict[str, Any]) -> dict[str, Any]:
     return {
-        "status": "coverage_unavailable",
-        "provider": "transitous",
-        "query": _transit_query(request, transit_modes),
-        "returned": 0,
-        "routes": [],
-        "message": (
-            "Transitous reported that routing data is unavailable for the "
-            "selected points."
-        ),
-        "warnings": warnings,
-        "attribution": TRANSITOUS_ATTRIBUTION,
+        "code": _text(alert.get("code")),
+        "cause": _text(alert.get("cause")),
+        "cause_detail": _text(alert.get("causeDetail")),
+        "effect": _text(alert.get("effect")),
+        "effect_detail": _text(alert.get("effectDetail")),
+        "severity": _text(alert.get("severityLevel")),
+        "header": _text(alert.get("headerText")),
+        "description": _text(alert.get("descriptionText")),
+        "url": _text(alert.get("url")),
     }
+
+
+def _place_warnings_for_leg(leg: dict[str, Any]) -> list[dict[str, Any]]:
+    places = [leg["from"], *leg["intermediate_stops"], leg["to"]]
+    return [warning for place in places for warning in _place_warnings(place)]
+
+
+def _place_warnings(place: dict[str, Any]) -> list[dict[str, Any]]:
+    context = {
+        "stop_id": place["stop_id"],
+        "stop_name": place["name"],
+    }
+    warnings = [
+        {"type": "service_alert", **context, **alert}
+        for alert in place["alerts"]
+    ]
+    if (
+        place["track"]
+        and place["scheduled_track"]
+        and place["track"] != place["scheduled_track"]
+    ):
+        warnings.append(
+            {
+                "type": "platform_change",
+                **context,
+                "track": place["track"],
+                "scheduled_track": place["scheduled_track"],
+            }
+        )
+    if place["cancelled"] is True:
+        warnings.append({"type": "stop_cancelled", **context})
+    for field, warning_type in (
+        ("pickup_type", "pickup_not_allowed"),
+        ("dropoff_type", "dropoff_not_allowed"),
+    ):
+        if place[field] == "NOT_ALLOWED":
+            warnings.append({"type": warning_type, **context})
+    return warnings
+
+
+def _leg_has_cancellations(leg: dict[str, Any]) -> bool:
+    if leg["cancelled"] is True:
+        return True
+    places = [leg["from"], *leg["intermediate_stops"], leg["to"]]
+    return any(place["cancelled"] is True for place in places)
+
+
+def _deduplicate_warnings(
+    warnings: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for warning in warnings:
+        key = json.dumps(warning, sort_keys=True, ensure_ascii=False)
+        if key not in seen:
+            seen.add(key)
+            result.append(warning)
+    return result
 
 
 def _coordinate_pair(lat: float, lon: float) -> str:
@@ -329,10 +403,6 @@ def _coordinate_pair(lat: float, lon: float) -> str:
 
 def _duration_ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
-
-
-def _list_value(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
 
 
 def _text(value: Any) -> str | None:

@@ -77,10 +77,10 @@ GET /api/v1/jobs/{job_id}/upstream-calls
 ```
 
 For routing, inspect `result_status`: `ok` confirms a provider route,
-`no_route` means none was found for the supplied query,
-`coverage_unavailable` means the provider explicitly reported missing data,
-and an envelope `status: "error"` means execution did not complete. Do not
-interpret `no_route` as proof that transport does not exist.
+`no_route` means none was found for the supplied query, and an envelope
+`status: "error"` means execution did not complete. MOTIS v6 does not expose a
+structured coverage-unavailable result, so do not interpret `no_route` as
+proof that transport does not exist.
 
 ## Smoke checks
 

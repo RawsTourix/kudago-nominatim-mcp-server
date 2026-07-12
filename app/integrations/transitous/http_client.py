@@ -17,6 +17,10 @@ class TransitousError(Exception):
     """Base exception for Transitous client errors."""
 
 
+class TransitousConfigurationError(TransitousError):
+    """Transitous cannot be called with the current configuration."""
+
+
 class TransitousParameterError(TransitousError):
     """The local Transitous request parameters are invalid."""
 
@@ -56,12 +60,18 @@ class TransitousHttpClient:
         *,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float | httpx.Timeout = 40.0,
-        user_agent: str,
+        user_agent: str | None,
         client: httpx.AsyncClient | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         trust_env: bool = True,
     ) -> None:
-        if not user_agent.strip() or user_agent.lower().startswith("python-httpx"):
+        if not user_agent or not user_agent.strip():
+            raise TransitousConfigurationError(
+                "TRANSITOUS_USER_AGENT is required to build a transit route; "
+                "include the application name, version and contact"
+            )
+        user_agent = user_agent.strip()
+        if user_agent.lower().startswith("python-httpx"):
             raise TransitousParameterError(
                 "Transitous requires an application-specific User-Agent"
             )

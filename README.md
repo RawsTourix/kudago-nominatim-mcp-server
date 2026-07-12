@@ -123,11 +123,11 @@ Copy-Item .env.example .env
 | `NOMINATIM_COUNTRYCODES` | ограничение поиска по странам |
 | `DEFAULT_RADIUS` | радиус геопоиска по умолчанию, метры |
 | `TRANSITOUS_BASE_URL` | базовый URL Transitous / MOTIS 2 |
-| `TRANSITOUS_USER_AGENT` | имя приложения, версия и контакт для Transitous |
+| `TRANSITOUS_USER_AGENT` | имя приложения, версия и контакт; проверяется при вызове transit routing |
 | `TRANSITOUS_TIMEOUT_SECONDS` | timeout Transitous routing |
 | `OPENROUTESERVICE_BASE_URL` | базовый URL OpenRouteService |
 | `OPENROUTESERVICE_API_KEY` | API key; требуется только при вызове street routing |
-| `OPENROUTESERVICE_USER_AGENT` | User-Agent OpenRouteService |
+| `OPENROUTESERVICE_USER_AGENT` | User-Agent OpenRouteService; по умолчанию `kudago-nominatim-service/0.1.0` |
 | `OPENROUTESERVICE_TIMEOUT_SECONDS` | timeout OpenRouteService directions |
 
 Не коммитьте `.env` с реальными учётными данными.

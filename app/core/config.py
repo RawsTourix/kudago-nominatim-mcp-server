@@ -19,12 +19,12 @@ class Settings(BaseSettings):
     default_radius: int = 50_000
 
     transitous_base_url: str = "https://api.transitous.org/"
-    transitous_user_agent: str
+    transitous_user_agent: str | None = None
     transitous_timeout_seconds: float = 40.0
 
     openrouteservice_base_url: str = "https://api.openrouteservice.org/"
     openrouteservice_api_key: str | None = None
-    openrouteservice_user_agent: str
+    openrouteservice_user_agent: str = "kudago-nominatim-service/0.1.0"
     openrouteservice_timeout_seconds: float = 30.0
 
     model_config = SettingsConfigDict(

@@ -187,6 +187,5 @@ location
 | `geo_not_found` | место не найдено |
 | `geo_unsupported` | endpoint не поддерживает найденные координаты |
 | `no_route` | provider корректно ответил, но маршрут не найден |
-| `coverage_unavailable` | provider явно сообщил об отсутствии данных покрытия |
 
 Для точных request/response schemas используйте OpenAPI `/docs`.

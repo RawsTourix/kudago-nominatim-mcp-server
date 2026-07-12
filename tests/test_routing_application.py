@@ -14,9 +14,16 @@ from app.integrations.transitous import (
     TransitousInvalidResponseError,
     TransitousResponseError,
 )
-from app.schemas.routing import StreetRouteRequest, TransitRouteRequest
+from app.schemas.routing import (
+    StreetRouteRequest,
+    TransitMode,
+    TransitRouteRequest,
+)
 from app.services.street_routing_service import StreetRoutingService
-from app.services.transit_routing_service import TransitRoutingService
+from app.services.transit_routing_service import (
+    DEFAULT_TRANSIT_MODES,
+    TransitRoutingService,
+)
 
 
 def transit_request(**overrides):
@@ -136,6 +143,27 @@ async def test_transit_service_normalizes_itinerary_and_tracks_call():
     assert tracked["success"] is True
     assert tracked["provider"] == "transitous"
     assert tracked["url_path"] == "/api/v6/plan"
+    sent_params = client.get.await_args.args[1]
+    assert sent_params["transitModes"] == [
+        mode.value for mode in DEFAULT_TRANSIT_MODES
+    ]
+    assert "TRANSIT" not in sent_params["transitModes"]
+
+
+@pytest.mark.asyncio
+async def test_transit_service_treats_explicit_transit_as_safe_alias():
+    client = SimpleNamespace(get=AsyncMock(return_value={"itineraries": []}))
+    service = TransitRoutingService(SimpleNamespace(), client=client)
+    service.upstream_call_repo = SimpleNamespace(create=AsyncMock())
+
+    result = await service.plan_route(
+        job_id=uuid4(),
+        request=transit_request(transit_modes=[TransitMode.TRANSIT]),
+    )
+
+    expected = [mode.value for mode in DEFAULT_TRANSIT_MODES]
+    assert result["query"]["transit_modes"] == expected
+    assert client.get.await_args.args[1]["transitModes"] == expected
 
 
 def test_transit_service_handles_empty_and_missing_optional_fields():
@@ -155,7 +183,79 @@ def test_transit_service_handles_empty_and_missing_optional_fields():
         "name": None,
         "lat": None,
         "lon": None,
+        "stop_id": None,
+        "track": None,
+        "scheduled_track": None,
+        "cancelled": None,
+        "pickup_type": None,
+        "dropoff_type": None,
+        "alerts": [],
     }
+
+
+def test_transit_service_collects_and_deduplicates_place_warnings():
+    alert = {
+        "code": "alert-1",
+        "cause": "TECHNICAL_PROBLEM",
+        "effect": "SIGNIFICANT_DELAYS",
+        "severityLevel": "SEVERE",
+        "headerText": "Service disruption",
+        "descriptionText": "Expect delays",
+        "url": "https://example.test/alert-1",
+    }
+    changed_stop = {
+        "name": "Stop A",
+        "lat": 52.519,
+        "lon": 13.4,
+        "stopId": "de:stop-a",
+        "track": "2",
+        "scheduledTrack": "1",
+        "cancelled": True,
+        "pickupType": "NOT_ALLOWED",
+        "alerts": [alert],
+    }
+    raw = {
+        "itineraries": [
+            {
+                "legs": [
+                    {"from": {"name": "Origin"}, "to": changed_stop},
+                    {
+                        "from": changed_stop,
+                        "to": {"name": "Destination"},
+                        "intermediateStops": [
+                            {
+                                "name": "Stop B",
+                                "stopId": "de:stop-b",
+                                "dropoffType": "NOT_ALLOWED",
+                            }
+                        ],
+                    },
+                ]
+            }
+        ]
+    }
+
+    result = TransitRoutingService._normalize(
+        raw,
+        transit_request(),
+        [mode.value for mode in DEFAULT_TRANSIT_MODES],
+    )
+
+    route = result["routes"][0]
+    stop = route["legs"][0]["to"]
+    assert stop["stop_id"] == "de:stop-a"
+    assert stop["track"] == "2"
+    assert stop["scheduled_track"] == "1"
+    assert stop["alerts"][0]["effect"] == "SIGNIFICANT_DELAYS"
+    assert route["has_cancellations"] is True
+    assert route["legs"][1]["intermediate_stops"][0]["stop_id"] == "de:stop-b"
+    warning_types = [warning["type"] for warning in route["warnings"]]
+    assert warning_types.count("service_alert") == 1
+    assert warning_types.count("platform_change") == 1
+    assert warning_types.count("stop_cancelled") == 1
+    assert warning_types.count("pickup_not_allowed") == 1
+    assert warning_types.count("dropoff_not_allowed") == 1
+    assert result["warnings"] == route["warnings"]
 
 
 def test_transit_service_rejects_naive_provider_time():
@@ -271,6 +371,23 @@ async def test_street_service_does_not_mask_5xx_as_no_route():
         reason_phrase="Server Error",
         response_text="internal failure",
         response_payload={"error": {"code": 2009, "message": "failure"}},
+    )
+    client = SimpleNamespace(post=AsyncMock(side_effect=error))
+    service = StreetRoutingService(SimpleNamespace(), client=client)
+    service.upstream_call_repo = SimpleNamespace(create=AsyncMock())
+
+    with pytest.raises(OpenRouteServiceResponseError):
+        await service.plan_route(job_id=uuid4(), request=street_request())
+
+
+@pytest.mark.asyncio
+async def test_street_service_does_not_mask_bare_404_as_no_route():
+    error = OpenRouteServiceResponseError(
+        message="endpoint not found",
+        status_code=404,
+        reason_phrase="Not Found",
+        response_text="endpoint not found",
+        response_payload={"error": "Not Found"},
     )
     client = SimpleNamespace(post=AsyncMock(side_effect=error))
     service = StreetRoutingService(SimpleNamespace(), client=client)

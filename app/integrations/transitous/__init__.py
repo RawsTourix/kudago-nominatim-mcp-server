@@ -1,6 +1,7 @@
 from .endpoints import plan_journey
 from .http_client import (
     TransitousError,
+    TransitousConfigurationError,
     TransitousHttpClient,
     TransitousInvalidResponseError,
     TransitousParameterError,
@@ -10,6 +11,7 @@ from .http_client import (
 
 __all__ = [
     "TransitousError",
+    "TransitousConfigurationError",
     "TransitousHttpClient",
     "TransitousInvalidResponseError",
     "TransitousParameterError",

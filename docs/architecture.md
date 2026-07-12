@@ -135,7 +135,6 @@ KudaGo location slug или подходящий ID объекта.
   job получает `succeeded`, а `result_payload.status` объясняет ограничение.
 - Кэшированные geo results не появляются в upstream calls, потому что внешнего
   HTTP-вызова в этом случае нет.
-- `no_route` and explicit `coverage_unavailable` are completed domain results,
-  so the job is `succeeded`. Timeouts, transport failures, HTTP 429/5xx,
-  invalid provider responses and ORS configuration failures make the job
-  `failed`.
+- `no_route` is a completed domain result, so the job is `succeeded`.
+  Timeouts, transport failures, HTTP 429/5xx, invalid provider responses and
+  routing configuration failures make the job `failed`.
