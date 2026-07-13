@@ -1,7 +1,12 @@
+import json
 from copy import deepcopy
 
 from app.application.contracts import CommandOutput
-from app.mcp.serializers.common import SEARCH_RESPONSE_LIMIT_BYTES, json_size
+from app.mcp.serializers.common import (
+    SEARCH_RESPONSE_LIMIT_BYTES,
+    iso_timestamp,
+    json_size,
+)
 from app.mcp.serializers.events import serialize_events
 from app.mcp.serializers.movie_showings import serialize_movie_showings
 from app.mcp.serializers.movies import serialize_movies
@@ -103,6 +108,145 @@ def test_event_serializer_drops_thousands_of_historical_dates_and_stays_small():
     assert len(data["items"][0]["matching_dates"]) == 1
     assert len(payload["items"][0]["dates"]) == original_date_count
     assert json_size(data) <= SEARCH_RESPONSE_LIMIT_BYTES
+
+
+def test_event_serializer_preserves_unbounded_dates_and_compact_schedules():
+    actual_since = 1_800_000_000
+    actual_until = 1_800_001_000
+    payload = {
+        "status": "ok",
+        "count": 1,
+        "returned": 1,
+        "items": [
+            {
+                "id": 1,
+                "title": "Long-running event",
+                "dates": [
+                    {
+                        "start": -62_135_433_000,
+                        "end": 253_370_754_000,
+                        "is_startless": True,
+                        "is_endless": True,
+                        "is_continuous": True,
+                        "schedules": [
+                            {
+                                "days_of_week": [1, 2, 3, 4, 5, 6],
+                                "start_time": "10:00:00",
+                                "end_time": "18:00:00",
+                                "unexpected_field": "must not be exposed",
+                            },
+                            "not-an-object",
+                            {},
+                        ],
+                        "use_place_schedule": False,
+                    },
+                    {
+                        "start": -62_135_433_000,
+                        "end": actual_until,
+                        "is_startless": True,
+                    },
+                    {
+                        "start": actual_since,
+                        "end": 253_370_754_000,
+                        "is_endless": True,
+                        "use_place_schedule": True,
+                    },
+                    {
+                        "end": actual_since - 1,
+                        "is_startless": True,
+                    },
+                    {
+                        "start": actual_until + 1,
+                        "is_endless": True,
+                    },
+                ],
+            }
+        ],
+    }
+    original = deepcopy(payload)
+
+    data = serialize_events(
+        output(payload),
+        actual_since=actual_since,
+        actual_until=actual_until,
+        applied_timezone="Europe/Moscow",
+    )
+
+    matching_dates = data["items"][0]["matching_dates"]
+    assert len(matching_dates) == 3
+    assert matching_dates[0] == {
+        "start": None,
+        "end": None,
+        "is_startless": True,
+        "is_endless": True,
+        "is_continuous": True,
+        "use_place_schedule": False,
+        "schedules": [
+            {
+                "days_of_week": [1, 2, 3, 4, 5, 6],
+                "start_time": "10:00:00",
+                "end_time": "18:00:00",
+            }
+        ],
+    }
+    assert matching_dates[1]["start"] is None
+    assert matching_dates[1]["end"] == iso_timestamp(actual_until)
+    assert matching_dates[2]["start"] == iso_timestamp(actual_since)
+    assert matching_dates[2]["end"] is None
+    assert matching_dates[2]["use_place_schedule"] is True
+    assert matching_dates[2]["schedules"] == []
+    assert json_size(data) <= SEARCH_RESPONSE_LIMIT_BYTES
+    json.dumps(data, ensure_ascii=False)
+    assert payload == original
+
+
+def test_iso_timestamp_never_raises_for_invalid_external_values():
+    assert iso_timestamp(10**100) is None
+    assert iso_timestamp("not-a-timestamp") is None
+    assert iso_timestamp(None) is None
+    assert iso_timestamp(True) is None
+
+
+def test_event_schedules_do_not_break_the_search_response_limit():
+    schedules = [
+        {
+            "days_of_week": [1, 2, 3, 4, 5, 6, 7],
+            "start_time": "10:00:00",
+            "end_time": "18:00:00",
+        }
+        for _ in range(2_000)
+    ]
+    payload = {
+        "status": "ok",
+        "count": 1,
+        "returned": 1,
+        "items": [
+            {
+                "id": 1,
+                "title": "Large schedule",
+                "dates": [
+                    {
+                        "start": -62_135_433_000,
+                        "end": 253_370_754_000,
+                        "is_startless": True,
+                        "is_endless": True,
+                        "schedules": schedules,
+                    }
+                ],
+            }
+        ],
+    }
+
+    data = serialize_events(
+        output(payload),
+        actual_since=1_800_000_000,
+        actual_until=1_800_001_000,
+        applied_timezone="Europe/Moscow",
+    )
+
+    assert json_size(data) <= SEARCH_RESPONSE_LIMIT_BYTES
+    assert data["truncated"] is True
+    assert len(payload["items"][0]["dates"][0]["schedules"]) == 2_000
 
 
 def test_semantic_flags_distinguish_places_movies_and_showings():

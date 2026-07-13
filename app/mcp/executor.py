@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -7,6 +8,8 @@ from app.core.db import AsyncSessionLocal
 from app.mcp.envelopes import mcp_error, mcp_ok
 from app.mcp.normalization import compact_geo, compact_mcp_data, compact_mcp_meta
 from app.services.job_service import JobService
+
+logger = logging.getLogger(__name__)
 
 
 async def run_mcp_command(
@@ -73,6 +76,12 @@ async def run_mcp_command(
             meta=compact_mcp_meta(output.meta),
         )
     except Exception as exc:
+        logger.exception(
+            "MCP serialization failed: tool=%s job_id=%s command=%s",
+            tool_name,
+            job.id,
+            command,
+        )
         return mcp_error(
             tool=tool_name,
             message="The complete result was saved, but MCP serialization failed.",

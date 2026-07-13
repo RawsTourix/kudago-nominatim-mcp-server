@@ -74,7 +74,10 @@ places require an explicit timezone. Calendar results report
 
 - `find_events`: `result_kind=scheduled_events`, `schedule_verified=true` for
   a completed KudaGo result, and only occurrence dates overlapping the applied
-  window;
+  window. In each `matching_dates` item, `start` or `end` can be `null` for
+  startless or endless events. `schedules` contains a compact recurring
+  schedule; `use_place_schedule=true` means that occurrence times should be
+  checked against the venue schedule;
 - `find_places`: `schedule_verified=false`; returned venues do not prove that
   an event is scheduled there;
 - `find_movies`: `showing_times_verified=false`; use

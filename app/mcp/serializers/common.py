@@ -109,21 +109,20 @@ def details_ref(item_type: str, item_id: Any) -> dict[str, str] | None:
 
 
 def iso_timestamp(value: Any) -> str | None:
-    if isinstance(value, bool):
+    if value is None or isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, timezone.utc).isoformat().replace(
-            "+00:00", "Z"
-        )
-    if isinstance(value, str):
-        try:
-            numeric = float(value)
-        except ValueError:
-            return value
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    try:
         return datetime.fromtimestamp(numeric, timezone.utc).isoformat().replace(
             "+00:00", "Z"
         )
-    return None
+    except (ValueError, OverflowError, OSError):
+        return None
 
 
 def compact_place(value: Any) -> dict[str, Any] | None:
