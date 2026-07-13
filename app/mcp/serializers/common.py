@@ -6,14 +6,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.application.contracts import CommandOutput
-from app.mcp.normalization import compact_geo
-
-
 SEARCH_RESPONSE_LIMIT_BYTES = 64 * 1024
 ROUTING_RESPONSE_LIMIT_BYTES = 128 * 1024
+DETAIL_RESPONSE_LIMIT_BYTES = 128 * 1024
 
 
-def search_base(output: CommandOutput) -> dict[str, Any]:
+def search_base(
+    output: CommandOutput,
+    *,
+    applied_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     payload = output.result_payload
     data: dict[str, Any] = {
         "status": output.status,
@@ -24,11 +26,8 @@ def search_base(output: CommandOutput) -> dict[str, Any]:
     for key in ("source", "message", "warnings", "attribution"):
         if key in payload:
             data[key] = deepcopy(payload[key])
-    if isinstance(payload.get("filters"), dict):
-        data["applied_filters"] = deepcopy(payload["filters"])
-    geo = compact_geo(payload.get("geo"))
-    if geo is not None:
-        data["geo"] = geo
+    if applied_filters:
+        data["applied_filters"] = deepcopy(applied_filters)
     return data
 
 
@@ -153,6 +152,7 @@ def pick(source: dict[str, Any], *keys: str) -> dict[str, Any]:
 
 
 __all__ = [
+    "DETAIL_RESPONSE_LIMIT_BYTES",
     "ROUTING_RESPONSE_LIMIT_BYTES",
     "SEARCH_RESPONSE_LIMIT_BYTES",
     "category_slugs",

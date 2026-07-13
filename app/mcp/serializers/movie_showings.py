@@ -6,19 +6,42 @@ from app.application.contracts import CommandOutput
 from app.mcp.serializers.common import (
     compact_place,
     enforce_item_limit,
+    iso_timestamp,
     pick,
     search_base,
 )
 
 
-def serialize_movie_showings(output: CommandOutput) -> dict[str, Any]:
-    data = search_base(output)
+def serialize_movie_showings(
+    output: CommandOutput,
+    *,
+    actual_since: int | None = None,
+    actual_until: int | None = None,
+    applied_timezone: str | None = None,
+    default_window_applied: bool = False,
+    applied_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data = search_base(output, applied_filters=applied_filters)
     data.update(
         {
             "result_kind": "movie_showings",
             "schedule_verified": output.status == "ok",
         }
     )
+    if actual_since is not None and actual_until is not None:
+        data["applied_time_window"] = {
+            "start": iso_timestamp(actual_since),
+            "end": iso_timestamp(actual_until),
+        }
+        data["applied_timezone"] = applied_timezone
+    elif default_window_applied:
+        filters = output.result_payload.get("filters")
+        if isinstance(filters, dict):
+            data["applied_time_window"] = {
+                "start": iso_timestamp(filters.get("actual_since")),
+                "end": iso_timestamp(filters.get("actual_until")),
+                "source": "default_next_7_days",
+            }
     data["items"] = [
         _serialize_showing(item)
         for item in output.items

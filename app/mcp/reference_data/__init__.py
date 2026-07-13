@@ -51,6 +51,48 @@ KudaGoLocationSlug = _build_enum(
 )
 
 
+def reference_timezone(
+    *,
+    location_slug: StrEnum | str | None = None,
+    location_text: str | None = None,
+) -> str | None:
+    """Return the normalized timezone for an exact committed location match."""
+    slug_value = (
+        location_slug.value if isinstance(location_slug, StrEnum) else location_slug
+    )
+    slug_needle = _normalize_reference_text(slug_value)
+    text_needle = _normalize_reference_text(location_text)
+    for location in REFERENCE_SNAPSHOT["locations"]:
+        slug = str(location.get("slug") or "")
+        name = str(location.get("name") or "")
+        if (
+            slug_needle and _normalize_reference_text(slug) == slug_needle
+        ) or (
+            text_needle
+            and text_needle
+            in {_normalize_reference_text(slug), _normalize_reference_text(name)}
+        ):
+            timezone_name = location.get("timezone")
+            return (
+                normalize_reference_timezone(timezone_name)
+                if isinstance(timezone_name, str)
+                else None
+            )
+    return None
+
+
+def normalize_reference_timezone(value: str) -> str:
+    value = value.strip()
+    match = re.fullmatch(r"GMT([+-]\d{2}:\d{2})", value, flags=re.IGNORECASE)
+    return match.group(1) if match is not None else value
+
+
+def _normalize_reference_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return " ".join(value.casefold().replace("ё", "е").split())
+
+
 __all__ = [
     "EventCategory",
     "KudaGoLocationSlug",
@@ -58,4 +100,6 @@ __all__ = [
     "REFERENCE_SNAPSHOT",
     "SNAPSHOT_PATH",
     "load_reference_snapshot",
+    "normalize_reference_timezone",
+    "reference_timezone",
 ]

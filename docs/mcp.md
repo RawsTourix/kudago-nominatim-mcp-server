@@ -65,8 +65,10 @@ City-only tools require exactly one of `city` and `location_slug`.
 
 Calendar tools accept either `date` or a complete `date_from`/`date_to` range.
 Ranges are inclusive and limited to 31 days. `timezone` accepts an IANA name
-or a fixed offset and is used to convert the start and end of each local day to
-UTC Unix timestamps.
+or a fixed offset. When omitted for an exact snapshot location slug or city
+name, the committed KudaGo timezone is used. Coordinates and other free-form
+places require an explicit timezone. Calendar results report
+`applied_timezone` and exact UTC boundaries.
 
 ## Semantic result flags
 
@@ -77,7 +79,8 @@ UTC Unix timestamps.
   an event is scheduled there;
 - `find_movies`: `showing_times_verified=false`; use
   `find_movie_showings` for actual times;
-- `find_movie_showings`: `schedule_verified=true` for a completed result;
+- `find_movie_showings`: `schedule_verified=true` for a completed result; when
+  date fields are omitted, the next seven days are searched;
 - routing: `route_verified=true` only when `result_status=ok` and at least one
   complete route remains in the MCP response.
 
@@ -85,6 +88,11 @@ Search/list `data` is limited to 64 KiB. Whole items are removed from the end
 when needed and the response reports `truncated`, `returned_to_agent` and
 `full_result_available`. Routing has a 128 KiB limit and removes whole route
 alternatives, never part of a leg. Full command output remains in job history.
+
+Search data exposes only agent-level `applied_filters`; internal timestamps,
+CSV values and `page_size` remain hidden. Geo metadata appears once in the MCP
+envelope. `get_details` is capped at 128 KiB by removing complete comments and
+showings from the end and reporting truncated sections.
 
 ## Routing visibility and workflow
 

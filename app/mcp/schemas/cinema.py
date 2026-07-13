@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 from pydantic import Field
@@ -42,6 +43,36 @@ PremieringOnlyInput = Annotated[
         )
     ),
 ]
+ShowingCalendarDateInput = Annotated[
+    date | None,
+    Field(
+        description=(
+            "Single showing date in YYYY-MM-DD format. Do not combine with "
+            "date_from/date_to. When all date fields are omitted, the next "
+            "seven days are searched."
+        )
+    ),
+]
+ShowingDateFromInput = Annotated[
+    date | None,
+    Field(
+        description=(
+            "First showing date in an inclusive YYYY-MM-DD range. Provide it "
+            "with date_to; omitting the entire date window searches the next "
+            "seven days."
+        )
+    ),
+]
+ShowingDateToInput = Annotated[
+    date | None,
+    Field(
+        description=(
+            "Last showing date in an inclusive range of at most 31 days. "
+            "Provide it with date_from; omitting all dates searches the next "
+            "seven days."
+        )
+    ),
+]
 
 
 class FindMoviesInput(CitySourceModel, CalendarWindowModel):
@@ -66,4 +97,7 @@ __all__ = [
     "FindMoviesInput",
     "MovieIdInput",
     "PremieringOnlyInput",
+    "ShowingCalendarDateInput",
+    "ShowingDateFromInput",
+    "ShowingDateToInput",
 ]

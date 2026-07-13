@@ -80,7 +80,7 @@ PlaceCategoriesInput = Annotated[
     Field(
         description=(
             "KudaGo venue and attraction categories, not event categories. "
-            "Common values include museums, theaters, parks, restaurants and "
+            "Common values include museums, theatre, park, restaurants and "
             "clubs; the complete committed v1.4 snapshot is in this field's enum."
         ),
         min_length=1,

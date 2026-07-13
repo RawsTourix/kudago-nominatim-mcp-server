@@ -3,11 +3,12 @@ from datetime import date, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.mcp.mappers.time_window import to_utc_window
+from app.mcp.mappers.time_window import resolve_calendar_timezone, to_utc_window
 from app.mcp.reference_data import (
     EventCategory,
     KudaGoLocationSlug,
     PlaceCategory,
+    reference_timezone,
 )
 from app.mcp.schemas.common import Coordinates
 from app.mcp.schemas.discovery import (
@@ -123,6 +124,41 @@ def test_calendar_window_validation_and_utc_boundaries():
             date=date(2026, 7, 13),
             date_from=date(2026, 7, 13),
             date_to=date(2026, 7, 14),
+        )
+
+
+def test_calendar_timezone_is_inferred_from_the_committed_location_snapshot():
+    request = FindEventsInput(
+        location_slug=KudaGoLocationSlug.EKB,
+        date=date(2026, 7, 14),
+    )
+    applied_timezone = resolve_calendar_timezone(
+        timezone_name=request.timezone,
+        location_slug=request.location_slug,
+        location_text=request.place,
+    )
+
+    assert applied_timezone == "Asia/Yekaterinburg"
+    assert reference_timezone(location_text="Москва") == "+03:00"
+    assert to_utc_window(
+        single_date=request.date,
+        date_from=request.date_from,
+        date_to=request.date_to,
+        timezone_name=applied_timezone,
+    ) == (1783969200, 1784055599)
+
+
+def test_calendar_timezone_is_required_for_unmapped_places_and_coordinates():
+    with pytest.raises(ValidationError, match="timezone is required"):
+        FindEventsInput(
+            place="Нахабино, Московская область",
+            date=date(2026, 7, 14),
+        )
+    with pytest.raises(ValidationError, match="timezone is required"):
+        FindEventsInput(
+            coordinates=Coordinates(latitude=55.75, longitude=37.61),
+            radius_km=5,
+            date=date(2026, 7, 14),
         )
 
 

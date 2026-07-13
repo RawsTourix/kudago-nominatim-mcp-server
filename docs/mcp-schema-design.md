@@ -53,9 +53,11 @@ to `countrycodes=None`, overriding the REST model's historical `ru` default.
 ## Date strategy
 
 Calendar inputs accept a single date or a complete inclusive range of at most
-31 days. IANA timezones and fixed UTC offsets are accepted. The mapper converts
+31 days. IANA timezones and fixed UTC offsets are accepted. An omitted timezone
+is inferred from an exact committed KudaGo location slug or city name; it is
+required for coordinates and other free-form locations. The mapper converts
 local start-of-day and end-of-day boundaries to UTC Unix timestamps for
-`actual_since` and `actual_until`.
+`actual_since` and `actual_until`, and reports the applied timezone.
 
 Events require a time window. Movie and showing searches allow no window so
 the existing application defaults remain available.
@@ -71,6 +73,11 @@ provider cursors and unrelated historical occurrences.
 Search/list data is capped at 64 KiB; routing data is capped at 128 KiB. Caps
 remove complete items or complete route alternatives from the end. They never
 mutate the saved command result.
+
+Low-level application filters are not copied into MCP data. Each tool supplies
+an agent-facing filter view using public names, list enums and calendar dates;
+geo remains in the envelope. Detail data is capped at 128 KiB by removing
+complete comments/showings before compacting the primary object summary.
 
 ## Semantic flags
 

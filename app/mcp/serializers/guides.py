@@ -11,8 +11,12 @@ from app.mcp.serializers.common import (
 )
 
 
-def serialize_guides(output: CommandOutput) -> dict[str, Any]:
-    data = search_base(output)
+def serialize_guides(
+    output: CommandOutput,
+    *,
+    applied_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data = search_base(output, applied_filters=applied_filters)
     data.update(
         {
             "result_kind": "city_guides",

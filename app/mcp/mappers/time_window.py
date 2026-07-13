@@ -4,13 +4,15 @@ import re
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo
 
+from app.mcp.reference_data import reference_timezone
+
 
 def to_utc_window(
     *,
     single_date: date | None,
     date_from: date | None,
     date_to: date | None,
-    timezone_name: str,
+    timezone_name: str | None,
 ) -> tuple[int | None, int | None]:
     if single_date is None and date_from is None and date_to is None:
         return None, None
@@ -20,6 +22,8 @@ def to_utc_window(
     if first_date is None or last_date is None:
         raise ValueError("A complete calendar date window is required.")
 
+    if timezone_name is None:
+        raise ValueError("A timezone is required for a calendar date window.")
     zone = parse_timezone(timezone_name)
     local_start = datetime.combine(first_date, time.min, tzinfo=zone)
     next_day = datetime.combine(last_date + timedelta(days=1), time.min, tzinfo=zone)
@@ -44,4 +48,18 @@ def parse_timezone(value: str) -> tzinfo:
     return timezone(delta)
 
 
-__all__ = ["parse_timezone", "to_utc_window"]
+def resolve_calendar_timezone(
+    *,
+    timezone_name: str | None,
+    location_slug: object | None,
+    location_text: str | None,
+) -> str | None:
+    if timezone_name is not None:
+        return timezone_name
+    return reference_timezone(
+        location_slug=location_slug,
+        location_text=location_text,
+    )
+
+
+__all__ = ["parse_timezone", "resolve_calendar_timezone", "to_utc_window"]

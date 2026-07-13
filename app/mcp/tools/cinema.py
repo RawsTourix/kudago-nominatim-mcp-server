@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from fastmcp import FastMCP
 from pydantic import ValidationError
 
 from app.mcp.executor import run_mcp_command
-from app.mcp.mappers import city_payload, to_utc_window
+from app.mcp.mappers import (
+    city_payload,
+    resolve_calendar_timezone,
+    to_utc_window,
+)
 from app.mcp.schemas.cinema import (
     CinemaIdInput,
     FindMovieShowingsInput,
     FindMoviesInput,
     MovieIdInput,
     PremieringOnlyInput,
+    ShowingCalendarDateInput,
+    ShowingDateFromInput,
+    ShowingDateToInput,
 )
 from app.mcp.schemas.common import (
     CalendarDateInput,
@@ -29,6 +37,7 @@ from app.mcp.serializers import serialize_movie_showings, serialize_movies
 from app.mcp.tools._common import (
     MCP_FACADE_VERSION,
     READ_ONLY_TOOL_ANNOTATIONS,
+    agent_filters,
     validation_error,
 )
 from app.schemas.movie_showings import MovieShowingsSearchRequest
@@ -48,7 +57,7 @@ def register_cinema_tools(mcp: FastMCP) -> None:
         date: CalendarDateInput = None,
         date_from: DateFromInput = None,
         date_to: DateToInput = None,
-        timezone: TimezoneInput = "+03:00",
+        timezone: TimezoneInput = None,
         free_only: OptionalBoolInput = None,
         premiering_only: PremieringOnlyInput = None,
         page: PageInput = 1,
@@ -73,11 +82,20 @@ def register_cinema_tools(mcp: FastMCP) -> None:
                 page=page,
                 limit=limit,
             )
+            applied_timezone = (
+                resolve_calendar_timezone(
+                    timezone_name=agent_request.timezone,
+                    location_slug=agent_request.location_slug,
+                    location_text=agent_request.city,
+                )
+                if agent_request.has_window
+                else None
+            )
             actual_since, actual_until = to_utc_window(
                 single_date=agent_request.date,
                 date_from=agent_request.date_from,
                 date_to=agent_request.date_to,
-                timezone_name=agent_request.timezone,
+                timezone_name=applied_timezone,
             )
             request = MoviesSearchRequest(
                 **city_payload(
@@ -103,7 +121,25 @@ def register_cinema_tools(mcp: FastMCP) -> None:
             command="movies.search",
             payload=request.model_dump(),
             request_text=agent_request.city or agent_request.location_slug.value,
-            data_factory=serialize_movies,
+            data_factory=partial(
+                serialize_movies,
+                actual_since=actual_since,
+                actual_until=actual_until,
+                applied_timezone=applied_timezone,
+                applied_filters=agent_filters(
+                    city=agent_request.city,
+                    location_slug=agent_request.location_slug,
+                    cinema_id=agent_request.cinema_id,
+                    date=agent_request.date,
+                    date_from=agent_request.date_from,
+                    date_to=agent_request.date_to,
+                    timezone=applied_timezone,
+                    free_only=agent_request.free_only,
+                    premiering_only=agent_request.premiering_only,
+                    page=agent_request.page,
+                    limit=agent_request.limit,
+                ),
+            ),
         )
 
     @mcp.tool(
@@ -116,17 +152,17 @@ def register_cinema_tools(mcp: FastMCP) -> None:
         location_slug: LocationSlugInput = None,
         movie_id: MovieIdInput = None,
         cinema_id: CinemaIdInput = None,
-        date: CalendarDateInput = None,
-        date_from: DateFromInput = None,
-        date_to: DateToInput = None,
-        timezone: TimezoneInput = "+03:00",
+        date: ShowingCalendarDateInput = None,
+        date_from: ShowingDateFromInput = None,
+        date_to: ShowingDateToInput = None,
+        timezone: TimezoneInput = None,
         free_only: OptionalBoolInput = None,
         page: PageInput = 1,
         limit: SearchLimitInput = 10,
     ) -> dict[str, Any]:
         """Find verified cinema showings with movie, cinema, date, time and available price information.
 
-        Use this for actual screening times. The result confirms only the showings explicitly returned by KudaGo.
+        Use this for actual screening times. When no date fields are supplied, the next seven days are searched. The result confirms only showings explicitly returned by KudaGo.
         """
         tool_name = "find_movie_showings"
         try:
@@ -143,11 +179,20 @@ def register_cinema_tools(mcp: FastMCP) -> None:
                 page=page,
                 limit=limit,
             )
+            applied_timezone = (
+                resolve_calendar_timezone(
+                    timezone_name=agent_request.timezone,
+                    location_slug=agent_request.location_slug,
+                    location_text=agent_request.city,
+                )
+                if agent_request.has_window
+                else None
+            )
             actual_since, actual_until = to_utc_window(
                 single_date=agent_request.date,
                 date_from=agent_request.date_from,
                 date_to=agent_request.date_to,
-                timezone_name=agent_request.timezone,
+                timezone_name=applied_timezone,
             )
             request = MovieShowingsSearchRequest(
                 **city_payload(
@@ -172,7 +217,26 @@ def register_cinema_tools(mcp: FastMCP) -> None:
             command="movie_showings.search",
             payload=request.model_dump(),
             request_text=agent_request.city or agent_request.location_slug.value,
-            data_factory=serialize_movie_showings,
+            data_factory=partial(
+                serialize_movie_showings,
+                actual_since=actual_since,
+                actual_until=actual_until,
+                applied_timezone=applied_timezone,
+                default_window_applied=not agent_request.has_window,
+                applied_filters=agent_filters(
+                    city=agent_request.city,
+                    location_slug=agent_request.location_slug,
+                    movie_id=agent_request.movie_id,
+                    cinema_id=agent_request.cinema_id,
+                    date=agent_request.date,
+                    date_from=agent_request.date_from,
+                    date_to=agent_request.date_to,
+                    timezone=applied_timezone,
+                    free_only=agent_request.free_only,
+                    page=agent_request.page,
+                    limit=agent_request.limit,
+                ),
+            ),
         )
 
 

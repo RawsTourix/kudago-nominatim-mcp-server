@@ -59,6 +59,18 @@ async def test_actual_fastmcp_schemas_expose_reference_enums_and_units():
     assert "kilometres" in tools["find_events"].inputSchema["properties"][
         "radius_km"
     ]["description"]
+    place_category_description = tools["find_places"].inputSchema["properties"][
+        "categories"
+    ]["description"]
+    assert "theatre" in place_category_description
+    assert "park" in place_category_description
+    assert "theaters" not in place_category_description
+    assert "parks" not in place_category_description
+    showing_date_description = tools["find_movie_showings"].inputSchema[
+        "properties"
+    ]["date"]["description"]
+    assert "next seven days" in showing_date_description
+    assert "next seven days" in tools["find_movie_showings"].description
 
 
 @pytest.mark.asyncio
@@ -75,6 +87,7 @@ async def test_actual_fastmcp_schemas_expose_defaults_limits_and_public_fields_o
     events = tools["find_events"].inputSchema["properties"]
     assert events["page"]["default"] == 1
     assert events["limit"]["default"] == 10
+    assert events["timezone"]["default"] is None
     assert _schema_value(events["page"], "minimum") == 1
     assert _schema_value(events["page"], "maximum") == 10_000
     assert _schema_value(events["limit"], "minimum") == 1

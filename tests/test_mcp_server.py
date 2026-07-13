@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastmcp import Client
 
 from app.mcp.server import create_mcp_server
+from app.mcp.tools import discovery
 
 
 def fully_configured_server():
@@ -47,3 +49,35 @@ async def test_routing_rejects_identical_points_before_job_creation():
     assert result.data["tool"] == "plan_public_transport"
     assert result.data["job_id"] is None
     assert result.data["error_type"] == "validation_error"
+
+
+@pytest.mark.asyncio
+async def test_find_events_maps_ekb_calendar_date_with_snapshot_timezone(
+    monkeypatch,
+):
+    run = AsyncMock(
+        return_value={
+            "status": "ok",
+            "tool": "find_events",
+            "job_id": "job-id",
+            "data": {"items": []},
+        }
+    )
+    monkeypatch.setattr(discovery, "run_mcp_command", run)
+
+    async with Client(fully_configured_server()) as client:
+        result = await client.call_tool(
+            "find_events",
+            {"location_slug": "ekb", "date": "2026-07-14"},
+        )
+
+    assert result.data["status"] == "ok"
+    kwargs = run.await_args.kwargs
+    assert kwargs["payload"]["actual_since"] == 1783969200
+    assert kwargs["payload"]["actual_until"] == 1784055599
+    assert kwargs["data_factory"].keywords["applied_timezone"] == (
+        "Asia/Yekaterinburg"
+    )
+    assert kwargs["data_factory"].keywords["applied_filters"]["timezone"] == (
+        "Asia/Yekaterinburg"
+    )

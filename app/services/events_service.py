@@ -11,6 +11,12 @@ from app.integrations.kudago import locations as kudago_locations
 from app.repositories.upstream_call_repository import UpstreamCallRepository
 
 
+EVENT_SEARCH_FIELDS = (
+    "id,title,short_title,description,dates,place,location,categories,tags,"
+    "price,is_free,site_url,age_restriction"
+)
+
+
 def normalize_text(value: str) -> str:
     return " ".join(value.casefold().replace("ё", "е").split())
 
@@ -120,10 +126,7 @@ class EventsService:
     ) -> dict[str, Any]:
         client = self.create_client()
         started = time.perf_counter()
-        fields = (
-            "id,title,short_title,dates,place,location,categories,tags,"
-            "price,is_free,site_url,age_restriction"
-        )
+        fields = EVENT_SEARCH_FIELDS
         request_payload = {
             "lang": lang,
             "page": page,

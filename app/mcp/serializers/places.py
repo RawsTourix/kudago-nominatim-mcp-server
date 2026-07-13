@@ -16,8 +16,12 @@ from app.mcp.serializers.common import (
 USAGE_NOTE = "These are places, not confirmed events for a selected date."
 
 
-def serialize_places(output: CommandOutput) -> dict[str, Any]:
-    data = search_base(output)
+def serialize_places(
+    output: CommandOutput,
+    *,
+    applied_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data = search_base(output, applied_filters=applied_filters)
     data.update(
         {
             "result_kind": "places",

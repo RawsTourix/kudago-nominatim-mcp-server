@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from fastmcp import FastMCP
@@ -22,6 +23,7 @@ from app.mcp.serializers import serialize_guides, serialize_news
 from app.mcp.tools._common import (
     MCP_FACADE_VERSION,
     READ_ONLY_TOOL_ANNOTATIONS,
+    agent_filters,
     validation_error,
 )
 from app.schemas.lists import ListsSearchRequest
@@ -73,7 +75,16 @@ def register_content_tools(mcp: FastMCP) -> None:
             command="news.search",
             payload=request.model_dump(),
             request_text=agent_request.city or agent_request.location_slug.value,
-            data_factory=serialize_news,
+            data_factory=partial(
+                serialize_news,
+                applied_filters=agent_filters(
+                    city=agent_request.city,
+                    location_slug=agent_request.location_slug,
+                    only_current=agent_request.only_current,
+                    page=agent_request.page,
+                    limit=agent_request.limit,
+                ),
+            ),
         )
 
     @mcp.tool(
@@ -117,7 +128,15 @@ def register_content_tools(mcp: FastMCP) -> None:
             command="lists.search",
             payload=request.model_dump(),
             request_text=agent_request.city or agent_request.location_slug.value,
-            data_factory=serialize_guides,
+            data_factory=partial(
+                serialize_guides,
+                applied_filters=agent_filters(
+                    city=agent_request.city,
+                    location_slug=agent_request.location_slug,
+                    page=agent_request.page,
+                    limit=agent_request.limit,
+                ),
+            ),
         )
 
 

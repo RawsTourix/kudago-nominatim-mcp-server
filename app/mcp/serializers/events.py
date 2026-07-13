@@ -19,23 +19,29 @@ def serialize_events(
     *,
     actual_since: int,
     actual_until: int,
+    applied_timezone: str,
+    applied_filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    data = search_base(output)
+    data = search_base(output, applied_filters=applied_filters)
     data.update(
         {
             "result_kind": "scheduled_events",
             "schedule_verified": output.status == "ok",
+            "applied_timezone": applied_timezone,
             "applied_time_window": {
                 "start": iso_timestamp(actual_since),
                 "end": iso_timestamp(actual_until),
             },
         }
     )
-    data["items"] = [
-        _serialize_event(item, actual_since, actual_until)
-        for item in output.items
-        if isinstance(item, dict)
-    ]
+    items: list[dict[str, Any]] = []
+    for item in output.items:
+        if not isinstance(item, dict):
+            continue
+        serialized = _serialize_event(item, actual_since, actual_until)
+        if serialized["matching_dates"]:
+            items.append(serialized)
+    data["items"] = items
     data["returned"] = len(data["items"])
     return enforce_item_limit(data)
 

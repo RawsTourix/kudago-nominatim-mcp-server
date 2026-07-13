@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.mcp.reference_data import KudaGoLocationSlug
+from app.mcp.reference_data import KudaGoLocationSlug, reference_timezone
 
 
 class Coordinates(BaseModel):
@@ -57,8 +57,9 @@ LocationSlugInput = Annotated[
     Field(
         description=(
             "Exact KudaGo location slug from the committed v1.4 reference "
-            "snapshot enum: ekb, interesting, kzn, msk, nnv or spb. Do not "
-            "combine it with a free-form location field."
+            "snapshot enum. Common values include msk, spb and ekb; the "
+            "complete committed list is in this field's enum. Do not combine "
+            "it with a free-form location field."
         )
     ),
 ]
@@ -129,12 +130,13 @@ DateToInput = Annotated[
     ),
 ]
 TimezoneInput = Annotated[
-    str,
+    str | None,
     Field(
         description=(
             "Timezone used to convert calendar-day boundaries to UTC. Use an "
-            "IANA name such as Europe/Moscow or a fixed offset such as +03:00; "
-            "defaults to +03:00."
+            "IANA name such as Europe/Moscow or a fixed offset such as +03:00. "
+            "When omitted, an exact location_slug or supported city name uses "
+            "the committed KudaGo timezone; otherwise timezone is required."
         ),
         min_length=1,
         max_length=64,
@@ -183,11 +185,13 @@ class CalendarWindowModel(BaseModel):
     date: CalendarDateInput = None
     date_from: DateFromInput = None
     date_to: DateToInput = None
-    timezone: TimezoneInput = "+03:00"
+    timezone: TimezoneInput = None
 
     @field_validator("timezone")
     @classmethod
-    def validate_timezone(cls, value: str) -> str:
+    def validate_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         value = value.strip()
         if _fixed_offset(value) is not None:
             return value
@@ -211,6 +215,37 @@ class CalendarWindowModel(BaseModel):
                 raise ValueError("date_to must not be earlier than date_from.")
             if (self.date_to - self.date_from).days + 1 > 31:
                 raise ValueError("The calendar date range must not exceed 31 days.")
+        if self.has_window and self.timezone is None:
+            source_fields = (
+                "place",
+                "city",
+                "location_slug",
+                "coordinates",
+            )
+            available_source_fields = [
+                field for field in source_fields if hasattr(self, field)
+            ]
+            if available_source_fields and sum(
+                getattr(self, field, None) is not None
+                for field in available_source_fields
+            ) != 1:
+                return self
+            if hasattr(self, "radius_km") and (
+                (getattr(self, "coordinates", None) is not None)
+                != (getattr(self, "radius_km", None) is not None)
+            ):
+                return self
+            inferred_timezone = reference_timezone(
+                location_slug=getattr(self, "location_slug", None),
+                location_text=(
+                    getattr(self, "city", None) or getattr(self, "place", None)
+                ),
+            )
+            if inferred_timezone is None:
+                raise ValueError(
+                    "timezone is required for coordinates or a free-form "
+                    "location that does not exactly match the KudaGo snapshot."
+                )
         return self
 
     @property

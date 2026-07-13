@@ -12,8 +12,12 @@ from app.mcp.serializers.common import (
 )
 
 
-def serialize_news(output: CommandOutput) -> dict[str, Any]:
-    data = search_base(output)
+def serialize_news(
+    output: CommandOutput,
+    *,
+    applied_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data = search_base(output, applied_filters=applied_filters)
     data["result_kind"] = "city_news"
     data["items"] = [
         _serialize_news_item(item)

@@ -10,6 +10,12 @@ from app.integrations.kudago import places as kudago_places
 from app.repositories.upstream_call_repository import UpstreamCallRepository
 
 
+PLACE_SEARCH_FIELDS = (
+    "id,title,short_title,description,slug,address,phone,site_url,"
+    "subway,coords,location,categories,tags,images,timetable,is_closed"
+)
+
+
 def csv_or_none(value: str | None) -> str | None:
     if value is None:
         return None
@@ -64,10 +70,7 @@ class PlacesService:
     ) -> dict[str, Any]:
         client = self.create_client()
         started = time.perf_counter()
-        fields = (
-            "id,title,slug,address,phone,site_url,subway,coords,location,"
-            "categories,tags,images"
-        )
+        fields = PLACE_SEARCH_FIELDS
         has_showings_param = kudago_has_showings(has_showings)
         request_payload = {
             "lang": lang,

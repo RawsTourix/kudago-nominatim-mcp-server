@@ -30,7 +30,7 @@ operation.
 | `coordinates.longitude` | KudaGo `lon`; routing longitude | nested model to scalar | -180 to 180; longitude is second |
 | `radius_km` | KudaGo `radius` in metres | multiply by 1000 and round to integer | 0.1–100 km; required with coordinates |
 | `date`, `date_from`, `date_to` | KudaGo `actual_since`, `actual_until` | local calendar boundaries to UTC Unix timestamps | single date or inclusive range, max 31 days |
-| `timezone` | MCP calendar semantics | IANA/fixed offset to aware datetime | default `+03:00` |
+| `timezone` | MCP calendar semantics and KudaGo `locations[].timezone` | explicit IANA/fixed offset or exact snapshot location inference | optional for known KudaGo locations; required for coordinates/unmapped place |
 | event `categories` | KudaGo v1.4 event-category slugs | enum list to CSV | separate committed event enum |
 | place `categories` | KudaGo v1.4 place-category slugs | enum list to CSV | separate committed place enum |
 | `free_only` | KudaGo `is_free` | renamed | nullable boolean; hidden raw name |

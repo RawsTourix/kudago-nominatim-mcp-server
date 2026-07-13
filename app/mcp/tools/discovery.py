@@ -8,7 +8,12 @@ from pydantic import ValidationError
 
 from app.application.contracts import CommandOutput
 from app.mcp.executor import run_mcp_command
-from app.mcp.mappers import enum_values_to_csv, location_payload, to_utc_window
+from app.mcp.mappers import (
+    enum_values_to_csv,
+    location_payload,
+    resolve_calendar_timezone,
+    to_utc_window,
+)
 from app.mcp.schemas.common import (
     CalendarDateInput,
     CoordinatesInput,
@@ -37,6 +42,7 @@ from app.mcp.serializers import serialize_events, serialize_places
 from app.mcp.tools._common import (
     MCP_FACADE_VERSION,
     READ_ONLY_TOOL_ANNOTATIONS,
+    agent_filters,
     validation_error,
 )
 from app.schemas.events import EventsSearchRequest
@@ -103,7 +109,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         date: CalendarDateInput = None,
         date_from: DateFromInput = None,
         date_to: DateToInput = None,
-        timezone: TimezoneInput = "+03:00",
+        timezone: TimezoneInput = None,
         categories: EventCategoriesInput = None,
         free_only: OptionalBoolInput = None,
         page: PageInput = 1,
@@ -129,11 +135,17 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                 page=page,
                 limit=limit,
             )
+            applied_timezone = resolve_calendar_timezone(
+                timezone_name=agent_request.timezone,
+                location_slug=agent_request.location_slug,
+                location_text=agent_request.place,
+            )
+            assert applied_timezone is not None
             actual_since, actual_until = to_utc_window(
                 single_date=agent_request.date,
                 date_from=agent_request.date_from,
                 date_to=agent_request.date_to,
-                timezone_name=agent_request.timezone,
+                timezone_name=applied_timezone,
             )
             assert actual_since is not None and actual_until is not None
             request = EventsSearchRequest(
@@ -165,6 +177,21 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                 serialize_events,
                 actual_since=actual_since,
                 actual_until=actual_until,
+                applied_timezone=applied_timezone,
+                applied_filters=agent_filters(
+                    place=agent_request.place,
+                    location_slug=agent_request.location_slug,
+                    coordinates=agent_request.coordinates,
+                    radius_km=agent_request.radius_km,
+                    date=agent_request.date,
+                    date_from=agent_request.date_from,
+                    date_to=agent_request.date_to,
+                    timezone=applied_timezone,
+                    categories=agent_request.categories,
+                    free_only=agent_request.free_only,
+                    page=agent_request.page,
+                    limit=agent_request.limit,
+                ),
             ),
         )
 
@@ -218,7 +245,18 @@ def register_discovery_tools(mcp: FastMCP) -> None:
             command="places.search",
             payload=request.model_dump(),
             request_text=agent_request.place or _enum_value(agent_request.location_slug),
-            data_factory=serialize_places,
+            data_factory=partial(
+                serialize_places,
+                applied_filters=agent_filters(
+                    place=agent_request.place,
+                    location_slug=agent_request.location_slug,
+                    coordinates=agent_request.coordinates,
+                    radius_km=agent_request.radius_km,
+                    categories=agent_request.categories,
+                    page=agent_request.page,
+                    limit=agent_request.limit,
+                ),
+            ),
         )
 
 

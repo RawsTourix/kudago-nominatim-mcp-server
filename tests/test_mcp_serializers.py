@@ -1,8 +1,8 @@
 from copy import deepcopy
 
 from app.application.contracts import CommandOutput
-from app.mcp.serializers.events import serialize_events
 from app.mcp.serializers.common import SEARCH_RESPONSE_LIMIT_BYTES, json_size
+from app.mcp.serializers.events import serialize_events
 from app.mcp.serializers.movie_showings import serialize_movie_showings
 from app.mcp.serializers.movies import serialize_movies
 from app.mcp.serializers.places import serialize_places
@@ -23,8 +23,13 @@ def output(payload):
 def test_event_serializer_keeps_only_matching_dates_without_mutating_full_result():
     payload = {
         "status": "ok",
-        "count": 1,
-        "returned": 1,
+        "count": 2,
+        "returned": 2,
+        "filters": {
+            "actual_since": 1_799_999_000,
+            "categories": "concert",
+        },
+        "geo": {"status": "ok", "kind": "kudago_location"},
         "items": [
             {
                 "id": 1,
@@ -35,7 +40,12 @@ def test_event_serializer_keeps_only_matching_dates_without_mutating_full_result
                     {"start": 1_700_000_000, "end": 1_700_000_100},
                     {"start": 1_800_000_000, "end": 1_800_000_100},
                 ],
-            }
+            },
+            {
+                "id": 2,
+                "title": "Historical only",
+                "dates": [{"start": 1_700_000_000, "end": 1_700_000_100}],
+            },
         ],
     }
     original = deepcopy(payload)
@@ -44,9 +54,20 @@ def test_event_serializer_keeps_only_matching_dates_without_mutating_full_result
         output(payload),
         actual_since=1_799_999_000,
         actual_until=1_800_001_000,
+        applied_timezone="Europe/Moscow",
+        applied_filters={"date": "2027-01-15", "categories": ["concert"]},
     )
 
+    assert len(data["items"]) == 1
     assert len(data["items"][0]["matching_dates"]) == 1
+    assert data["returned"] == 1
+    assert data["applied_timezone"] == "Europe/Moscow"
+    assert data["applied_filters"] == {
+        "date": "2027-01-15",
+        "categories": ["concert"],
+    }
+    assert "actual_since" not in data["applied_filters"]
+    assert "geo" not in data
     assert "body_text" not in data["items"][0]
     assert "images" not in data["items"][0]
     assert payload == original
@@ -76,6 +97,7 @@ def test_event_serializer_drops_thousands_of_historical_dates_and_stays_small():
         output(payload),
         actual_since=1_799_999_000,
         actual_until=1_800_001_000,
+        applied_timezone="+03:00",
     )
 
     assert len(data["items"][0]["matching_dates"]) == 1
@@ -88,6 +110,27 @@ def test_semantic_flags_distinguish_places_movies_and_showings():
     assert serialize_places(output(base))["schedule_verified"] is False
     assert serialize_movies(output(base))["showing_times_verified"] is False
     assert serialize_movie_showings(output(base))["schedule_verified"] is True
+
+
+def test_movie_showings_exposes_the_default_next_seven_day_window():
+    payload = {
+        "status": "ok",
+        "count": 0,
+        "returned": 0,
+        "items": [],
+        "filters": {
+            "actual_since": 1_800_000_000,
+            "actual_until": 1_800_604_800,
+        },
+    }
+
+    data = serialize_movie_showings(
+        output(payload),
+        default_window_applied=True,
+    )
+
+    assert data["applied_time_window"]["source"] == "default_next_7_days"
+    assert "actual_since" not in data.get("applied_filters", {})
 
 
 def test_routing_serializer_removes_geometry_and_marks_verified_status():
