@@ -2,11 +2,11 @@
 
 ## Overview
 
-The service exposes the same application commands through two transports:
+The service exposes one application command layer through two contracts:
 
 - FastAPI REST under `/api/v1/*`; search commands are queued for an arq worker,
   while reference and object GET endpoints remain synchronous and untracked;
-- FastMCP over streamable HTTP at `/mcp` or as a standalone stdio server.
+- an agent-facing FastMCP v2 facade over streamable HTTP at `/mcp` or stdio.
 
 MCP commands execute inline, create jobs with method `MCP`, and persist command
 results, job events, and upstream-call diagnostics before returning a result.
@@ -25,6 +25,7 @@ OpenRouteService — маршруты пешком, на велосипеде и
 ## Features
 
 - FastMCP transport over streamable HTTP and stdio;
+- ten self-contained agent tools with enums, field descriptions and compact results;
 - FastAPI HTTP API и автоматическая OpenAPI-документация;
 - PostgreSQL и асинхронный SQLAlchemy;
 - Redis и arq для фоновых задач;
@@ -60,7 +61,7 @@ app/
   api/             HTTP dependencies and routers
   core/            configuration, PostgreSQL and Redis
   integrations/    KudaGo, Nominatim and routing provider clients
-  mcp/             FastMCP server, execution helper and tools
+  mcp/             agent schemas, mappers, serializers, FastMCP server and tools
   models/          SQLAlchemy models
   repositories/    database access
   schemas/         Pydantic request and response models
@@ -123,10 +124,10 @@ Copy-Item .env.example .env
 | `NOMINATIM_COUNTRYCODES` | ограничение поиска по странам |
 | `DEFAULT_RADIUS` | радиус геопоиска по умолчанию, метры |
 | `TRANSITOUS_BASE_URL` | базовый URL Transitous / MOTIS 2 |
-| `TRANSITOUS_USER_AGENT` | имя приложения, версия и контакт; проверяется при вызове transit routing |
+| `TRANSITOUS_USER_AGENT` | имя приложения, версия и контакт; без значения transit MCP tool не публикуется |
 | `TRANSITOUS_TIMEOUT_SECONDS` | timeout Transitous routing |
 | `OPENROUTESERVICE_BASE_URL` | базовый URL OpenRouteService |
-| `OPENROUTESERVICE_API_KEY` | API key; требуется только при вызове street routing |
+| `OPENROUTESERVICE_API_KEY` | API key; без значения street-route MCP tool не публикуется |
 | `OPENROUTESERVICE_USER_AGENT` | User-Agent OpenRouteService; по умолчанию `kudago-nominatim-service/0.1.0` |
 | `OPENROUTESERVICE_TIMEOUT_SECONDS` | timeout OpenRouteService directions |
 
@@ -221,8 +222,8 @@ alembic revision --autogenerate -m "describe change"
 Полная таблица: [docs/api.md](docs/api.md).
 
 Маршрутизация принимает только координаты. Если известен адрес или название,
-сначала используйте `resolve_place`, затем передайте выбранные координаты в
-`transit_route` либо `street_route`. Подробные контракты и ограничения описаны
+сначала используйте `resolve_location`, затем передайте выбранные координаты в
+`plan_public_transport` либо `plan_street_route`. Подробные контракты и ограничения описаны
 в [docs/routing.md](docs/routing.md).
 
 ## Jobs Lifecycle
@@ -263,6 +264,7 @@ Run the MCP checks after PostgreSQL is available and migrations are applied:
 python scripts/test_mcp_inmemory.py
 python scripts/test_mcp_stdio.py
 python scripts/test_mcp_http.py
+python scripts/dump_mcp_schemas.py
 ```
 
 The HTTP check expects the FastAPI application to be running. To launch only

@@ -1,0 +1,146 @@
+from copy import deepcopy
+
+from app.application.contracts import CommandOutput
+from app.mcp.serializers.events import serialize_events
+from app.mcp.serializers.common import SEARCH_RESPONSE_LIMIT_BYTES, json_size
+from app.mcp.serializers.movie_showings import serialize_movie_showings
+from app.mcp.serializers.movies import serialize_movies
+from app.mcp.serializers.places import serialize_places
+from app.mcp.serializers.routing import serialize_routing
+
+
+def output(payload):
+    items = payload.get("items", payload.get("routes", []))
+    return CommandOutput(
+        status=payload.get("status", "ok"),
+        result_type="test",
+        items=items,
+        meta={},
+        result_payload=payload,
+    )
+
+
+def test_event_serializer_keeps_only_matching_dates_without_mutating_full_result():
+    payload = {
+        "status": "ok",
+        "count": 1,
+        "returned": 1,
+        "items": [
+            {
+                "id": 1,
+                "title": "Event",
+                "body_text": "large",
+                "images": [{"image": "x"}],
+                "dates": [
+                    {"start": 1_700_000_000, "end": 1_700_000_100},
+                    {"start": 1_800_000_000, "end": 1_800_000_100},
+                ],
+            }
+        ],
+    }
+    original = deepcopy(payload)
+
+    data = serialize_events(
+        output(payload),
+        actual_since=1_799_999_000,
+        actual_until=1_800_001_000,
+    )
+
+    assert len(data["items"][0]["matching_dates"]) == 1
+    assert "body_text" not in data["items"][0]
+    assert "images" not in data["items"][0]
+    assert payload == original
+
+
+def test_event_serializer_drops_thousands_of_historical_dates_and_stays_small():
+    historical_dates = [
+        {"start": 1_700_000_000 + index, "end": 1_700_000_001 + index}
+        for index in range(5_000)
+    ]
+    payload = {
+        "status": "ok",
+        "count": 1,
+        "returned": 1,
+        "items": [
+            {
+                "id": 1,
+                "title": "Event",
+                "dates": historical_dates
+                + [{"start": 1_800_000_000, "end": 1_800_000_100}],
+            }
+        ],
+    }
+    original_date_count = len(payload["items"][0]["dates"])
+
+    data = serialize_events(
+        output(payload),
+        actual_since=1_799_999_000,
+        actual_until=1_800_001_000,
+    )
+
+    assert len(data["items"][0]["matching_dates"]) == 1
+    assert len(payload["items"][0]["dates"]) == original_date_count
+    assert json_size(data) <= SEARCH_RESPONSE_LIMIT_BYTES
+
+
+def test_semantic_flags_distinguish_places_movies_and_showings():
+    base = {"status": "ok", "count": 0, "returned": 0, "items": []}
+    assert serialize_places(output(base))["schedule_verified"] is False
+    assert serialize_movies(output(base))["showing_times_verified"] is False
+    assert serialize_movie_showings(output(base))["schedule_verified"] is True
+
+
+def test_routing_serializer_removes_geometry_and_marks_verified_status():
+    payload = {
+        "status": "ok",
+        "provider": "openrouteservice",
+        "profile": "walking",
+        "query": {
+            "origin": {"lat": 55.75, "lon": 37.61},
+            "destination": {"lat": 55.76, "lon": 37.62},
+        },
+        "routes": [{"geometry": "encoded", "segments": []}],
+        "returned": 1,
+        "warnings": [],
+        "attribution": [],
+    }
+    data = serialize_routing(output(payload))
+    assert data["route_verified"] is True
+    assert "geometry" not in data["routes"][0]
+    assert data["routes"][0]["geometry_hidden"] is True
+    assert data["mode"] == "walking"
+    assert "profile" not in data
+    assert data["query"]["origin"] == {
+        "latitude": 55.75,
+        "longitude": 37.61,
+    }
+
+    no_route = serialize_routing(
+        output({"status": "no_route", "routes": [], "returned": 0})
+    )
+    assert no_route["route_verified"] is False
+    assert no_route["routes"] == []
+
+
+def test_transit_routing_query_uses_agent_time_and_mode_names():
+    payload = {
+        "status": "ok",
+        "provider": "transitous",
+        "query": {
+            "origin": {"lat": 55.75, "lon": 37.61},
+            "destination": {"lat": 55.76, "lon": 37.62},
+            "time": "2026-07-13T12:00:00+03:00",
+            "arrive_by": True,
+            "transit_modes": ["SUBWAY", "HIGHSPEED_RAIL"],
+        },
+        "routes": [{"legs": []}],
+        "returned": 1,
+    }
+
+    data = serialize_routing(output(payload))
+
+    assert data["query"]["arrival_time"] == "2026-07-13T12:00:00+03:00"
+    assert data["query"]["modes"] == ["subway", "high_speed_rail"]
+    assert "arrive_by" not in data["query"]
+    assert "time" not in data["query"]
+    assert "transit_modes" not in data["query"]

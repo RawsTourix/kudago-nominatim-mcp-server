@@ -1,9 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastmcp import Client
 
-from app.mcp.server import mcp
+from app.mcp.server import create_mcp_server
 from app.mcp.tools import routing
 
 
@@ -11,8 +12,8 @@ from app.mcp.tools import routing
 @pytest.mark.parametrize(
     ("tool_name", "command", "extra_args"),
     [
-        ("transit_route", "routing.transit.plan", {}),
-        ("street_route", "routing.street.plan", {"profile": "cycling"}),
+        ("plan_public_transport", "routing.transit.plan", {}),
+        ("plan_street_route", "routing.street.plan", {"mode": "cycling"}),
     ],
 )
 async def test_routing_tools_use_shared_mcp_executor(
@@ -30,15 +31,19 @@ async def test_routing_tools_use_shared_mcp_executor(
         }
     )
     monkeypatch.setattr(routing, "run_mcp_command", run)
+    server = create_mcp_server(
+        settings_obj=SimpleNamespace(
+            transitous_user_agent="tests/1.0 tests@example.com",
+            openrouteservice_api_key="test-key",
+        )
+    )
     arguments = {
-        "origin_lat": 55.842,
-        "origin_lon": 37.180,
-        "destination_lat": 55.751,
-        "destination_lon": 37.617,
+        "origin": {"latitude": 55.842, "longitude": 37.180},
+        "destination": {"latitude": 55.751, "longitude": 37.617},
         **extra_args,
     }
 
-    async with Client(mcp) as client:
+    async with Client(server) as client:
         result = await client.call_tool(tool_name, arguments)
 
     assert result.data["status"] == "ok"
@@ -47,3 +52,6 @@ async def test_routing_tools_use_shared_mcp_executor(
     assert kwargs["endpoint"] == f"mcp://tools/{tool_name}"
     assert kwargs["request_text"] == "55.842,37.18 -> 55.751,37.617"
     assert kwargs["payload"]["origin_lat"] == 55.842
+    if tool_name == "plan_street_route":
+        assert kwargs["payload"]["profile"] == "cycling"
+        assert kwargs["payload"]["include_geometry"] is False

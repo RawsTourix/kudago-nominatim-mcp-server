@@ -1,0 +1,344 @@
+{
+  "api_version": "v1.4",
+  "generated_at": "2026-07-13T13:05:41.699Z",
+  "event_categories": [
+    {
+      "slug": "business-events",
+      "name": "События для бизнеса"
+    },
+    {
+      "slug": "cinema",
+      "name": "Кинопоказы"
+    },
+    {
+      "slug": "concert",
+      "name": "Концерты"
+    },
+    {
+      "slug": "education",
+      "name": "Обучение"
+    },
+    {
+      "slug": "entertainment",
+      "name": "Развлечения"
+    },
+    {
+      "slug": "exhibition",
+      "name": "Выставки"
+    },
+    {
+      "slug": "fashion",
+      "name": "Мода и стиль"
+    },
+    {
+      "slug": "festival",
+      "name": "Фестивали"
+    },
+    {
+      "slug": "holiday",
+      "name": "Праздники"
+    },
+    {
+      "slug": "kids",
+      "name": "Детям"
+    },
+    {
+      "slug": "other",
+      "name": "Разное"
+    },
+    {
+      "slug": "party",
+      "name": "Вечеринки"
+    },
+    {
+      "slug": "photo",
+      "name": "Фотография"
+    },
+    {
+      "slug": "quest",
+      "name": "Квесты"
+    },
+    {
+      "slug": "recreation",
+      "name": "Активный отдых"
+    },
+    {
+      "slug": "shopping",
+      "name": "Шопинг (Магазины)"
+    },
+    {
+      "slug": "social-activity",
+      "name": "Благотворительность"
+    },
+    {
+      "slug": "stock",
+      "name": "Акции и скидки"
+    },
+    {
+      "slug": "theater",
+      "name": "Спектакли"
+    },
+    {
+      "slug": "tour",
+      "name": "Экскурсии"
+    },
+    {
+      "slug": "wellness-and-health",
+      "name": "Красота и здоровье"
+    },
+    {
+      "slug": "yarmarki-razvlecheniya-yarmarki",
+      "name": "Ярмарки (Развлечения, Ярмарки)"
+    }
+  ],
+  "place_categories": [
+    {
+      "slug": "airports",
+      "name": "Аэропорты"
+    },
+    {
+      "slug": "amusement",
+      "name": "Развлечения"
+    },
+    {
+      "slug": "animal-shelters",
+      "name": "Питомники"
+    },
+    {
+      "slug": "anticafe",
+      "name": "Антикафе"
+    },
+    {
+      "slug": "art-centers",
+      "name": "Арт-центры"
+    },
+    {
+      "slug": "art-space",
+      "name": "Арт-пространства"
+    },
+    {
+      "slug": "attractions",
+      "name": "Достопримечательности"
+    },
+    {
+      "slug": "bar",
+      "name": "Бары и пабы"
+    },
+    {
+      "slug": "brewery",
+      "name": "Пивоварня"
+    },
+    {
+      "slug": "bridge",
+      "name": "Мосты"
+    },
+    {
+      "slug": "business",
+      "name": "Бизнес-центры"
+    },
+    {
+      "slug": "car-washes",
+      "name": "Автомойки"
+    },
+    {
+      "slug": "cats",
+      "name": "Кошачий питомник"
+    },
+    {
+      "slug": "church",
+      "name": "Церкви"
+    },
+    {
+      "slug": "cinema",
+      "name": "Кинотеатры"
+    },
+    {
+      "slug": "clubs",
+      "name": "Клубы"
+    },
+    {
+      "slug": "comedy-club",
+      "name": "Камеди клаб"
+    },
+    {
+      "slug": "concert-hall",
+      "name": "Концертные залы"
+    },
+    {
+      "slug": "coworking",
+      "name": "Коворкинги"
+    },
+    {
+      "slug": "culture",
+      "name": "Дома культуры"
+    },
+    {
+      "slug": "dance-studio",
+      "name": "Танцевальные студии"
+    },
+    {
+      "slug": "dogs",
+      "name": "Собачий питомник"
+    },
+    {
+      "slug": "education-centers",
+      "name": "Учебные заведения"
+    },
+    {
+      "slug": "fountain",
+      "name": "Фонтаны"
+    },
+    {
+      "slug": "handmade",
+      "name": "HandMade"
+    },
+    {
+      "slug": "homesteads",
+      "name": "Усадьбы"
+    },
+    {
+      "slug": "hostels",
+      "name": "Хостелы"
+    },
+    {
+      "slug": "inn",
+      "name": "Гостиницы и отели"
+    },
+    {
+      "slug": "kids",
+      "name": "Детям"
+    },
+    {
+      "slug": "library",
+      "name": "Библиотеки"
+    },
+    {
+      "slug": "metro",
+      "name": "Метро"
+    },
+    {
+      "slug": "monastery",
+      "name": "Монастыри"
+    },
+    {
+      "slug": "museums",
+      "name": "Музеи и галереи"
+    },
+    {
+      "slug": "observatory",
+      "name": "Обсерватории"
+    },
+    {
+      "slug": "other",
+      "name": "Прочее"
+    },
+    {
+      "slug": "palace",
+      "name": "Дворцы"
+    },
+    {
+      "slug": "park",
+      "name": "Парки (Интересные места, Отдых)"
+    },
+    {
+      "slug": "photo-places",
+      "name": "Фотоместа (Фотография)"
+    },
+    {
+      "slug": "prirodnyj-zapovednik",
+      "name": "Природный заповедник"
+    },
+    {
+      "slug": "questroom",
+      "name": "Квесты"
+    },
+    {
+      "slug": "recreation",
+      "name": "Активный отдых"
+    },
+    {
+      "slug": "restaurants",
+      "name": "Рестораны и кафе"
+    },
+    {
+      "slug": "rynok",
+      "name": "Рынок"
+    },
+    {
+      "slug": "salons",
+      "name": "Красота и здоровье"
+    },
+    {
+      "slug": "shops",
+      "name": "Магазины"
+    },
+    {
+      "slug": "sights",
+      "name": "Интересные места"
+    },
+    {
+      "slug": "stable",
+      "name": "Конюшни, конные клубы"
+    },
+    {
+      "slug": "station",
+      "name": "Вокзалы"
+    },
+    {
+      "slug": "strip-club",
+      "name": "Стрип-клуб"
+    },
+    {
+      "slug": "suburb",
+      "name": "Загородный отдых"
+    },
+    {
+      "slug": "synagogue",
+      "name": "Синагоги"
+    },
+    {
+      "slug": "temple",
+      "name": "Храмы"
+    },
+    {
+      "slug": "theatre",
+      "name": "Театры"
+    },
+    {
+      "slug": "workshops",
+      "name": "Мастерские"
+    }
+  ],
+  "locations": [
+    {
+      "slug": "ekb",
+      "name": "Екатеринбург",
+      "timezone": "Asia/Yekaterinburg"
+    },
+    {
+      "slug": "interesting",
+      "name": "Интересные материалы",
+      "timezone": "GMT+03:00"
+    },
+    {
+      "slug": "kzn",
+      "name": "Казань",
+      "timezone": "GMT+03:00"
+    },
+    {
+      "slug": "msk",
+      "name": "Москва",
+      "timezone": "GMT+03:00"
+    },
+    {
+      "slug": "nnv",
+      "name": "Нижний Новгород",
+      "timezone": "GMT+03:00"
+    },
+    {
+      "slug": "spb",
+      "name": "Санкт-Петербург",
+      "timezone": "GMT+03:00"
+    }
+  ]
+}

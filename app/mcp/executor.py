@@ -17,6 +17,7 @@ async def run_mcp_command(
     payload: dict[str, Any],
     request_text: str | None = None,
     geo_factory: Callable[[CommandOutput], dict[str, Any] | None] | None = None,
+    data_factory: Callable[[CommandOutput], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Execute a command inline while preserving the complete MCP job history."""
     job = None
@@ -57,11 +58,25 @@ async def run_mcp_command(
         if geo_factory is not None
         else output.result_payload.get("geo")
     )
-    return mcp_ok(
-        tool=tool_name,
-        job_id=job.id,
-        data=compact_mcp_data(output.result_payload),
-        result_status=output.status,
-        geo=compact_geo(geo),
-        meta=compact_mcp_meta(output.meta),
-    )
+    try:
+        data = (
+            data_factory(output)
+            if data_factory is not None
+            else compact_mcp_data(output.result_payload)
+        )
+        return mcp_ok(
+            tool=tool_name,
+            job_id=job.id,
+            data=data,
+            result_status=output.status,
+            geo=compact_geo(geo),
+            meta=compact_mcp_meta(output.meta),
+        )
+    except Exception as exc:
+        return mcp_error(
+            tool=tool_name,
+            message="The complete result was saved, but MCP serialization failed.",
+            error_type=exc.__class__.__name__,
+            job_id=job.id,
+            retryable=False,
+        )

@@ -18,6 +18,19 @@ python -m alembic upgrade head
 python -m pytest -q
 ```
 
+The MCP-specific suite verifies the exact tool catalog, actual schemas through
+`fastmcp.Client`, cross-field validation, serializers, response caps,
+conditional routing visibility and the committed reference snapshot.
+
+Inspect and persist the actual schemas with:
+
+```powershell
+python scripts/dump_mcp_schemas.py
+```
+
+The script writes `artifacts/mcp_schemas.json` and fails when a public property
+has no description.
+
 ## 2. REST and worker regression
 
 Start the API and worker in separate terminals:
@@ -56,10 +69,8 @@ An alternative query can be supplied as the positional argument:
 python scripts/test_mcp_http.py "Апрелевка"
 ```
 
-Each script verifies `ping`, tool discovery, all search tools, `reference`,
-`object`, and their MCP envelopes. The in-memory script also checks the
-`geo_ambiguous` results and opens the first returned event when available. The
-scripts print `job_id` values for the diagnostics check.
+Each script verifies `ping`, the version 2 agent catalog, discovery tools and
+their MCP envelopes. The scripts print `job_id` values for diagnostics.
 
 Routing unit tests use `httpx.MockTransport`, injected clients and
 `AsyncMock`; they do not access Transitous or OpenRouteService over the network.

@@ -1,11 +1,13 @@
-from .geo import register_geo_tools
-from .read import register_read_tools
+from .cinema import register_cinema_tools
+from .content import register_content_tools
+from .details import register_details_tools
+from .discovery import register_discovery_tools
 from .routing import register_routing_tools
-from .search import register_search_tools
 
 __all__ = [
-    "register_geo_tools",
-    "register_read_tools",
+    "register_cinema_tools",
+    "register_content_tools",
+    "register_details_tools",
+    "register_discovery_tools",
     "register_routing_tools",
-    "register_search_tools",
 ]

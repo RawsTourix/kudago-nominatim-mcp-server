@@ -1,63 +1,116 @@
-# FastMCP transport
+# Agent-facing FastMCP transport
 
-The FastMCP transport exposes the shared application command layer. It is
-available as streamable HTTP at `/mcp` on the FastAPI application and as a
-standalone stdio server:
+FastMCP is available as streamable HTTP at `/mcp` and as a standalone stdio
+server:
 
 ```powershell
 uvicorn app.main:app --reload --port 8011
 python -m app.mcp
 ```
 
-## Tools
+The MCP contract is a version 2 agent facade. It maps user intentions to the
+existing application commands; it is deliberately not a second copy of the
+REST request models.
 
-| Tool | Purpose | Key parameters | Command |
-|---|---|---|---|
-| `resolve_place` | Resolve a free-form place with Nominatim | `query`, `countrycodes`, `limit` | `geo.resolve` |
-| `events` | Search events | location or geo input, dates, categories, tags | `events.search` |
-| `places` | Search places | location or geo input, categories, showings | `places.search` |
-| `movies` | Search movies | `location`, `place_query`, `place_id`, dates | `movies.search` |
-| `movie_showings` | Search cinema showings | location, movie/place ID, dates | `movie_showings.search` |
-| `news` | Search news | `location`, `place_query`, `tags` | `news.search` |
-| `lists` | Search editorial lists | `location`, `place_query`, `tags` | `lists.search` |
-| `reference` | Read categories and locations | `kind`, optional `slug`, `lang` | `reference.get` |
-| `object` | Read an object detail | `object_type`, `object_id`, include flags | `object.detail` |
-| `transit_route` | Verified public transport journey | coordinate pair, time, transit modes | `routing.transit.plan` |
-| `street_route` | Verified walking/cycling/driving route | coordinate pair, profile | `routing.street.plan` |
+## Tool catalog
 
-`reference.kind` supports `event_categories`, `place_categories`, `locations`,
-and `location`. The latter requires `slug`. `locations` lists official KudaGo
-slugs; it is not a whitelist of every searchable city. For another city,
-settlement, district, address, or landmark, pass the free-form name as
-`place_query` to `events` or `places`. Those tools check KudaGo locations first
-and can fall back to Nominatim coordinates.
+| MCP tool | User intent | Application command |
+|---|---|---|
+| `resolve_location` | Geocode a free-form location | `geo.resolve` |
+| `find_events` | Find scheduled events in a calendar window | `events.search` |
+| `find_places` | Find venues and attractions | `places.search` |
+| `find_movies` | Find movie records | `movies.search` |
+| `find_movie_showings` | Find actual cinema showings | `movie_showings.search` |
+| `find_city_news` | Find current or historical city news | `news.search` |
+| `find_city_guides` | Find editorial city guides | `lists.search` |
+| `get_details` | Hydrate an item returned by a search tool | `object.detail` |
+| `plan_public_transport` | Plan a public-transport journey | `routing.transit.plan` |
+| `plan_street_route` | Plan a walking, cycling or driving route | `routing.street.plan` |
 
-`object.object_type` supports `event`, `place`, `movie`, `movie_showing`,
-`news`, `list`, `agent`, `agent_role`, and `location`. Use `include_comments`
-where comments are supported and `include_showings` for a movie.
+The former MCP names (`events`, `places`, `reference`, `object`,
+`transit_route`, and the other version 1 names) are not aliases. This is an
+intentional MCP-only breaking change. REST endpoints and application command
+names are unchanged.
 
-## Routing workflow
+## Self-contained schemas
 
-1. Call `resolve_place` for a textual origin or address.
-2. Read destination coordinates from an event or an `object` detail result.
-3. Call `transit_route` for trains, suburban rail, metro, buses, trams,
-   ferries and transfers. Its itinerary already includes walking access,
-   transfers and egress where Transitous supplies them.
-4. Call `street_route` only for a separate walking, cycling or driving route.
+Every public field has a JSON Schema description and machine-readable limits.
+Finite sets use enums:
 
-Never use `street_route` to invent public transport stops, schedules or missing
-transit legs. There is no automatic Transitous-to-OpenRouteService fallback.
-The routing tools accept coordinates only; provider-specific profile names are
-not part of their schemas.
+- event categories and place categories are separate enums;
+- KudaGo locations come from the committed v1.4 reference snapshot;
+- detail item types and routing modes are fixed agent-facing enums;
+- `radius_km`, `limit`, page bounds and string lengths carry numeric/string
+  constraints.
 
-## Response envelope
+The runtime never downloads reference data. Refresh it explicitly with:
+
+```powershell
+python scripts/update_mcp_reference_data.py
+```
+
+The `reference` tool is therefore no longer required. See
+[mcp-schema-design.md](mcp-schema-design.md) and
+[mcp-api-sources.md](mcp-api-sources.md).
+
+## Location and time rules
+
+`find_events` and `find_places` require exactly one of:
+
+- `place` for a free-form city, district, address or landmark;
+- `location_slug` for a value from the committed KudaGo enum;
+- `coordinates` plus `radius_km`.
+
+City-only tools require exactly one of `city` and `location_slug`.
+
+Calendar tools accept either `date` or a complete `date_from`/`date_to` range.
+Ranges are inclusive and limited to 31 days. `timezone` accepts an IANA name
+or a fixed offset and is used to convert the start and end of each local day to
+UTC Unix timestamps.
+
+## Semantic result flags
+
+- `find_events`: `result_kind=scheduled_events`, `schedule_verified=true` for
+  a completed KudaGo result, and only occurrence dates overlapping the applied
+  window;
+- `find_places`: `schedule_verified=false`; returned venues do not prove that
+  an event is scheduled there;
+- `find_movies`: `showing_times_verified=false`; use
+  `find_movie_showings` for actual times;
+- `find_movie_showings`: `schedule_verified=true` for a completed result;
+- routing: `route_verified=true` only when `result_status=ok` and at least one
+  complete route remains in the MCP response.
+
+Search/list `data` is limited to 64 KiB. Whole items are removed from the end
+when needed and the response reports `truncated`, `returned_to_agent` and
+`full_result_available`. Routing has a 128 KiB limit and removes whole route
+alternatives, never part of a leg. Full command output remains in job history.
+
+## Routing visibility and workflow
+
+`plan_public_transport` is registered only when `TRANSITOUS_USER_AGENT` is
+non-empty. `plan_street_route` is registered only when
+`OPENROUTESERVICE_API_KEY` is non-empty. Missing configuration produces a
+server warning instead of a tool that is guaranteed to fail.
+
+When only text is known:
+
+1. call `resolve_location`;
+2. select one coordinate candidate;
+3. call `plan_public_transport` for schedules, stops and transfers, or
+   `plan_street_route` for an independent walking/cycling/driving route.
+
+Provider-specific values such as `TRANSIT`, `foot-walking` and
+`cycling-regular` are not public MCP values.
+
+## Response envelope and errors
 
 Successful calls return:
 
 ```json
 {
   "status": "ok",
-  "tool": "events",
+  "tool": "find_events",
   "job_id": "uuid",
   "result_status": "ok",
   "geo": null,
@@ -66,26 +119,35 @@ Successful calls return:
 }
 ```
 
-Validation failures and execution errors return `status: "error"`, `tool`,
-`error_type`, `message`, and a nullable `job_id`. A non-null job ID means the
-execution can be inspected through the REST diagnostics endpoints:
+Cross-field validation errors are structured and occur before job creation:
+
+```json
+{
+  "status": "error",
+  "tool": "find_events",
+  "job_id": null,
+  "error_type": "validation_error",
+  "message": "Invalid tool arguments.",
+  "details": [
+    {
+      "field": "radius_km",
+      "code": "missing_required_companion",
+      "message": "radius_km is required when coordinates are provided."
+    }
+  ],
+  "retryable": true
+}
+```
+
+Execution diagnostics and full results are available through the unchanged
+REST job endpoints:
 
 ```text
 GET /api/v1/jobs/{job_id}
 GET /api/v1/jobs/{job_id}/events
+GET /api/v1/jobs/{job_id}/results
 GET /api/v1/jobs/{job_id}/upstream-calls
 ```
 
-For routing, inspect `result_status`: `ok` confirms a provider route,
-`no_route` means none was found for the supplied query, and an envelope
-`status: "error"` means execution did not complete. MOTIS v6 does not expose a
-structured coverage-unavailable result, so do not interpret `no_route` as
-proof that transport does not exist.
-
-## Smoke checks
-
-```powershell
-python scripts/test_mcp_inmemory.py
-python scripts/test_mcp_stdio.py
-python scripts/test_mcp_http.py
-```
+All tools declare read-only, non-destructive, idempotent and open-world MCP
+annotation hints.

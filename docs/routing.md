@@ -1,80 +1,65 @@
 # Routing
 
-The service exposes two independent, coordinate-first routing capabilities:
+The service exposes two independent coordinate-first routing capabilities:
 
-| Domain | Application command | MCP tool | Provider |
+| Domain | Application command | MCP v2 tool | Provider |
 |---|---|---|---|
-| Public transport | `routing.transit.plan` | `transit_route` | Transitous / MOTIS 2 |
-| Walking, cycling, driving | `routing.street.plan` | `street_route` | OpenRouteService |
+| Public transport | `routing.transit.plan` | `plan_public_transport` | Transitous / MOTIS 2 |
+| Walking, cycling, driving | `routing.street.plan` | `plan_street_route` | OpenRouteService |
 
 ## Responsibility boundary
 
-`transit_route` handles trains, suburban rail, metro, buses, trams, ferries,
-transfers and the walking access/egress legs supplied inside the Transitous
-itinerary. `street_route` handles only an independent walking, cycling or
-driving journey. The tools do not call each other and there is no automatic
-fallback from Transitous to OpenRouteService.
+`plan_public_transport` handles trains, suburban rail, metro, buses, trams,
+ferries, transfers and the walking access/egress legs supplied inside a
+Transitous itinerary. `plan_street_route` handles only an independent walking,
+cycling or driving journey. The tools do not call each other and there is no
+provider fallback.
 
-Both tools accept coordinates, not addresses. Use this workflow when the user
-provided text:
+Both tools accept nested `{latitude, longitude}` points. Resolve text first:
 
 ```text
-resolve_place -> select confirmed coordinates -> transit_route or street_route
+resolve_location -> select confirmed coordinates -> routing tool
 ```
 
-Do not rebuild Transitous walking legs through OpenRouteService. Do not infer
-stations, line numbers, transfers or schedules from a street route.
+Public MCP modes are lower-case agent values. The mapper converts them to the
+existing application enums; ORS profiles such as `foot-walking` remain
+internal. Street MCP calls always request instructions and disable geometry.
 
 ## Normalized contracts
 
-Transit results contain a stable `query`, `routes`, `warnings` and
-`attribution`. Every itinerary includes departure/arrival time, duration,
-transfer count, realtime/cancellation flags, and normalized legs. Leg facts
-such as stop IDs, tracks, pickup/dropoff rules, alerts, line names, headsign,
-agency and scheduled/realtime times are copied only when the provider supplied
-them. Stop alerts, platform changes and cancellations are deduplicated into
-route and result warnings. Geometry, MOTIS debug output, page cursors and raw
-request parameters are not exposed.
+Transit routes contain query facts, complete alternatives, warnings and the
+required Transitous/OpenStreetMap attribution. Street routes contain distance,
+duration, bbox, segments and instructions. Provider raw responses, MOTIS debug
+fields, cursors and geometry are absent from MCP data.
 
-Street results contain the external profile (`walking`, `cycling` or
-`driving`), route distance/duration, bbox, segments and optional steps. The
-OpenRouteService profile names `foot-walking`, `cycling-regular` and
-`driving-car` remain internal. Full geometry is persisted only when requested;
-the compact MCP response always removes it and sets `geometry_hidden: true`.
+`route_verified` is true only when `result_status=ok` and at least one complete
+route is returned to the agent. `no_route` produces `route_verified=false` and
+an empty route list; it is not proof that transport does not exist.
 
-Complete persisted results remain available at:
+MCP routing data is limited to 128 KiB by removing whole alternatives from the
+end, never part of a leg. Complete persisted results remain available at:
 
 ```text
 GET /api/v1/jobs/{job_id}/results
 GET /api/v1/jobs/{job_id}?include_result=true
 ```
 
-## Status and error model
+## Conditional publication
 
-| Result status | Meaning | Job state |
-|---|---|---|
-| `ok` | provider returned at least one normalized route | `succeeded` |
-| `no_route` | provider returned no route for this query | `succeeded` |
-| execution error | timeout, network/DNS, HTTP 429/5xx, invalid response or configuration failure | `failed` |
+- `plan_public_transport` is published only when `TRANSITOUS_USER_AGENT` is
+  non-empty and includes application name, client version and contact;
+- `plan_street_route` is published only when `OPENROUTESERVICE_API_KEY` is
+  non-empty.
 
-Only OpenRouteService routing error codes `2009` and `2016` are normalized as
-`no_route`; a bare HTTP 404 can also mean an unavailable endpoint and remains
-an execution error. MOTIS v6 does not provide a structured coverage signal.
-A `no_route` result is not proof that transport does not exist—it only
-describes this provider query.
+The FastAPI and worker routing commands remain available regardless of MCP
+catalog visibility. Missing MCP provider configuration is logged as a warning.
 
-## Provider requirements
+## Provider contracts
 
-Transitous is a community best-effort service. Coverage and realtime data are
-not guaranteed. The service can start without `TRANSITOUS_USER_AGENT`, but a
-transit routing call then fails with a configuration error. Transitous asks the
-header to contain the application name, client version and a contact email or
-website. Results include links to the Transitous data sources and OpenStreetMap
-attribution. An omitted `transit_modes` (or the compatibility alias `TRANSIT`)
-expands to an explicit safe set and does not enable airplane, ODM, ride-sharing
-or unknown modes.
+Transitous production currently links to the tagged MOTIS `v2.10.2` OpenAPI
+definition. The service calls stable `GET /api/v6/plan`, whose coordinate
+strings are `latitude,longitude`. OpenRouteService Directions v2 receives
+`[longitude, latitude]` at `POST /v2/directions/{profile}/json`.
 
-OpenRouteService requires `OPENROUTESERVICE_API_KEY` only when `street_route` is
-called. The key is sent in the authorization header and is never written to
-jobs, command results, upstream payloads, logs or error text. An empty key does
-not prevent FastAPI, the worker or MCP server from starting.
+Only ORS error codes `2009` and `2016` are normalized as `no_route`; a bare HTTP
+404 remains an execution error. MOTIS v6 has no structured coverage result.

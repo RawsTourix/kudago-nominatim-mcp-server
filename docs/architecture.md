@@ -5,7 +5,7 @@
 | Layer | Responsibility |
 |---|---|
 | `api/routers` | HTTP routes, dependencies and response mapping |
-| `mcp` | FastMCP HTTP/stdio transport, tools and MCP response envelopes |
+| `mcp` | agent schemas, mappers, serializers, FastMCP tools and envelopes |
 | `application` | shared command contracts, `CommandExecutor` and handlers |
 | `schemas` | Pydantic request and response contracts |
 | `services` | reusable business rules and integration orchestration |
@@ -63,17 +63,21 @@ using Redis and the arq worker:
 ```text
 MCP client
   -> FastMCP tool over /mcp or stdio
+  -> agent schema validation and application-payload mapping
   -> create job with method=MCP
   -> CommandExecutor inline
   -> command handler
   -> services
   -> KudaGo / Nominatim
   -> upstream_calls + command_results + job_events
-  -> commit diagnostics and return the MCP envelope
+  -> commit full diagnostics and result
+  -> agent serializer and response-size cap
+  -> return the MCP envelope
 ```
 
 The shared command layer keeps transport-specific code limited to validation,
-job submission/execution mode, and response mapping.
+job submission/execution mode, payload mapping and response serialization.
+MCP serializers never mutate the persisted `CommandOutput.result_payload`.
 
 Routing follows the same split. REST endpoints enqueue
 `routing.transit.plan` or `routing.street.plan`; MCP tools execute those exact
@@ -85,8 +89,9 @@ other and neither performs geocoding.
 ## Synchronous Reads
 
 REST reference and object-detail GET endpoints intentionally remain direct,
-synchronous and untracked. They do not create jobs or write diagnostics. The
-equivalent MCP tools are always tracked through the inline command flow above.
+synchronous and untracked. They do not create jobs or write diagnostics. MCP
+`get_details` is tracked through the inline command flow; reference data is a
+committed schema snapshot and has no public MCP tool.
 
 Небольшие справочные и detail-запросы выполняются без Redis:
 
@@ -126,6 +131,11 @@ KudaGo location slug или подходящий ID объекта.
 `GET /jobs/{id}` возвращает компактный `result_payload`: массивы `items` и
 `routes` заменяются на count/hidden-поля и подсказку. Полный результат доступен
 через `/results` или `?include_result=true`.
+
+The MCP facade applies a second, agent-specific view only after persistence.
+Search/list data is limited to 64 KiB and routing data to 128 KiB. Whole items
+or route alternatives are removed from the end; full command results and
+upstream diagnostics remain unchanged in PostgreSQL.
 
 ## Failure Model
 
