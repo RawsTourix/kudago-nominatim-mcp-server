@@ -12,6 +12,29 @@ The MCP contract is a version 2 agent facade. It maps user intentions to the
 existing application commands; it is deliberately not a second copy of the
 REST request models.
 
+## Execution lifecycle
+
+All MCP application commands use the shared queued lifecycle:
+
+```text
+FastMCP tool
+  -> commit api_request + job in PostgreSQL
+  -> enqueue process_command_job in Redis
+  -> await arq worker
+  -> load the persisted CommandOutput in a new DB session
+  -> MCP serializer and response envelope
+```
+
+The arq worker is required for HTTP, stdio and in-memory MCP transports. The
+FastMCP server owns one Redis pool per server lifespan and exposes it to tools
+through the hidden `Context` parameter; `ctx` is not part of any public tool
+schema. Application handlers and external APIs run only in the worker.
+
+MCP waits up to `MCP_JOB_WAIT_TIMEOUT_SECONDS` (180 seconds by default). A
+timeout returns `processing_timeout` with `retryable=false`, leaves the job
+queued or running, and does not abort it. Redis, worker and timeout failures
+never fall back to inline execution.
+
 ## Tool catalog
 
 | MCP tool | User intent | Application command |
@@ -147,6 +170,20 @@ Cross-field validation errors are structured and occur before job creation:
     }
   ],
   "retryable": true
+}
+```
+
+If a worker is not available before the configured wait timeout, the persisted
+job remains available for later worker execution:
+
+```json
+{
+  "status": "error",
+  "tool": "find_events",
+  "job_id": "uuid",
+  "error_type": "processing_timeout",
+  "message": "The job is still queued or running and did not finish within the MCP wait timeout.",
+  "retryable": false
 }
 ```
 

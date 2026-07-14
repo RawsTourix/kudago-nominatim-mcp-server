@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     database_url: str
     redis_url: str = "redis://localhost:6379/0"
+    mcp_job_wait_timeout_seconds: float = 180.0
 
     kudago_base_url: str = "https://kudago.com/public-api/v1.4/"
     kudago_lang: str = "ru"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from app.application.contracts import CommandOutput
@@ -57,6 +57,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def resolve_location(
+        ctx: Context,
         place: ResolvePlaceInput,
         country_codes: CountryCodesInput = None,
         language: LanguageInput = "ru",
@@ -88,6 +89,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/resolve_location",
             command="geo.resolve",
@@ -102,6 +104,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def find_events(
+        ctx: Context,
         place: PlaceInput = None,
         location_slug: LocationSlugInput = None,
         coordinates: CoordinatesInput = None,
@@ -168,6 +171,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/find_events",
             command="events.search",
@@ -201,6 +205,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def find_places(
+        ctx: Context,
         place: PlaceInput = None,
         location_slug: LocationSlugInput = None,
         coordinates: CoordinatesInput = None,
@@ -240,6 +245,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/find_places",
             command="places.search",

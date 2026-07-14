@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from app.mcp.executor import run_mcp_command
@@ -51,6 +51,7 @@ def register_cinema_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def find_movies(
+        ctx: Context,
         city: CityInput = None,
         location_slug: LocationSlugInput = None,
         cinema_id: CinemaIdInput = None,
@@ -116,6 +117,7 @@ def register_cinema_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/find_movies",
             command="movies.search",
@@ -148,6 +150,7 @@ def register_cinema_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def find_movie_showings(
+        ctx: Context,
         city: CityInput = None,
         location_slug: LocationSlugInput = None,
         movie_id: MovieIdInput = None,
@@ -212,6 +215,7 @@ def register_cinema_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/find_movie_showings",
             command="movie_showings.search",

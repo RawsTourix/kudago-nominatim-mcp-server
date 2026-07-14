@@ -2,11 +2,15 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from arq.connections import ArqRedis
+
 from app.application.contracts import CommandOutput
 from app.application.executor import CommandExecutor
+from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.mcp.envelopes import mcp_error, mcp_ok
 from app.mcp.normalization import compact_geo, compact_mcp_data, compact_mcp_meta
+from app.services.job_dispatch_service import JobDispatchService
 from app.services.job_service import JobService
 
 logger = logging.getLogger(__name__)
@@ -14,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 async def run_mcp_command(
     *,
+    redis: ArqRedis,
     tool_name: str,
     endpoint: str,
     command: str,
@@ -22,40 +27,77 @@ async def run_mcp_command(
     geo_factory: Callable[[CommandOutput], dict[str, Any] | None] | None = None,
     data_factory: Callable[[CommandOutput], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Execute a command inline while preserving the complete MCP job history."""
-    job = None
-
+    """Queue a command, await its worker result, and serialize persisted output."""
     async with AsyncSessionLocal() as session:
         try:
-            job = await JobService(session).create_job_from_request(
+            dispatched = await JobDispatchService(
+                session,
+                redis,
+            ).create_and_enqueue(
                 endpoint=endpoint,
                 method="MCP",
                 command=command,
                 input_payload=payload,
                 request_text=request_text,
             )
-            output = await CommandExecutor(session).run_payload(
-                job_id=job.id,
-                command=command,
-                payload=payload,
-                source="mcp",
-                endpoint=endpoint,
-            )
-            await session.commit()
         except Exception as exc:
-            if job is None:
-                await session.rollback()
-            else:
-                # CommandExecutor records failure diagnostics in this transaction.
-                await session.commit()
             return mcp_error(
                 tool=tool_name,
                 message=str(exc),
                 error_type=exc.__class__.__name__,
-                job_id=job.id if job is not None else None,
+                job_id=getattr(exc, "job_id", None),
+                retryable=False,
             )
 
-    assert job is not None
+    try:
+        await dispatched.arq_job.result(
+            timeout=settings.mcp_job_wait_timeout_seconds,
+        )
+    except TimeoutError:
+        return mcp_error(
+            tool=tool_name,
+            job_id=dispatched.job.id,
+            error_type="processing_timeout",
+            message=(
+                "The job is still queued or running and did not finish within "
+                "the MCP wait timeout."
+            ),
+            retryable=False,
+        )
+    except Exception as exc:
+        async with AsyncSessionLocal() as session:
+            job = await JobService(session).get_by_id(dispatched.job.id)
+
+        if job is not None and job.status == "failed":
+            return mcp_error(
+                tool=tool_name,
+                job_id=job.id,
+                error_type=job.error_type or exc.__class__.__name__,
+                message=job.error_message or str(exc),
+                retryable=False,
+            )
+        return mcp_error(
+            tool=tool_name,
+            job_id=dispatched.job.id,
+            error_type=exc.__class__.__name__,
+            message=str(exc),
+            retryable=False,
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            output = await CommandExecutor(session).load_completed_output(
+                dispatched.job.id
+            )
+    except Exception as exc:
+        return mcp_error(
+            tool=tool_name,
+            job_id=dispatched.job.id,
+            error_type=exc.__class__.__name__,
+            message=str(exc),
+            retryable=False,
+        )
+
     geo = (
         geo_factory(output)
         if geo_factory is not None
@@ -69,7 +111,7 @@ async def run_mcp_command(
         )
         return mcp_ok(
             tool=tool_name,
-            job_id=job.id,
+            job_id=dispatched.job.id,
             data=data,
             result_status=output.status,
             geo=compact_geo(geo),
@@ -79,13 +121,13 @@ async def run_mcp_command(
         logger.exception(
             "MCP serialization failed: tool=%s job_id=%s command=%s",
             tool_name,
-            job.id,
+            dispatched.job.id,
             command,
         )
         return mcp_error(
             tool=tool_name,
             message="The complete result was saved, but MCP serialization failed.",
             error_type=exc.__class__.__name__,
-            job_id=job.id,
+            job_id=dispatched.job.id,
             retryable=False,
         )

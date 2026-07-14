@@ -18,6 +18,7 @@ from app.mcp.tools import routing
 )
 async def test_routing_tools_use_shared_mcp_executor(
     monkeypatch,
+    fake_mcp_redis,
     tool_name,
     command,
     extra_args,
@@ -33,6 +34,7 @@ async def test_routing_tools_use_shared_mcp_executor(
     monkeypatch.setattr(routing, "run_mcp_command", run)
     server = create_mcp_server(
         settings_obj=SimpleNamespace(
+            redis_url="redis://test:6379/0",
             transitous_user_agent="tests/1.0 tests@example.com",
             openrouteservice_api_key="test-key",
         )
@@ -48,6 +50,7 @@ async def test_routing_tools_use_shared_mcp_executor(
 
     assert result.data["status"] == "ok"
     kwargs = run.await_args.kwargs
+    assert kwargs["redis"] is fake_mcp_redis.redis
     assert kwargs["command"] == command
     assert kwargs["endpoint"] == f"mcp://tools/{tool_name}"
     assert kwargs["request_text"] == "55.842,37.18 -> 55.751,37.617"

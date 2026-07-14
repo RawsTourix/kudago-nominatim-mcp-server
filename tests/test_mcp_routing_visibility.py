@@ -15,6 +15,7 @@ from app.mcp.server import create_mcp_server
     ],
 )
 async def test_unconfigured_routing_provider_is_not_published(
+    fake_mcp_redis,
     transit_user_agent,
     ors_key,
     present,
@@ -22,6 +23,7 @@ async def test_unconfigured_routing_provider_is_not_published(
 ):
     server = create_mcp_server(
         settings_obj=SimpleNamespace(
+            redis_url="redis://test:6379/0",
             transitous_user_agent=transit_user_agent,
             openrouteservice_api_key=ors_key,
         )

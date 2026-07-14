@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from app.mcp.executor import run_mcp_command
@@ -30,6 +30,7 @@ def register_details_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def get_details(
+        ctx: Context,
         item_type: ItemTypeInput,
         item_id: ItemIdInput,
         include_comments: IncludeCommentsInput = False,
@@ -63,6 +64,7 @@ def register_details_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/get_details",
             command="object.detail",

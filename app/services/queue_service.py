@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from arq.connections import ArqRedis
+from arq.jobs import Job as ArqJob
 
 
 class QueueService:
@@ -18,83 +19,16 @@ class QueueService:
 
         return job.job_id if job is not None else None
 
-    async def enqueue_geo_resolve_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"geo.resolve:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_geo_resolve_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None
+    async def enqueue_command_job(
+        self,
+        *,
+        job_id: UUID,
+        command: str,
+    ) -> ArqJob | None:
+        queue_job_id = f"{command}:{job_id}"
 
-    async def enqueue_events_search_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"events.search:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_events_search_job",
+        return await self.redis.enqueue_job(
+            "process_command_job",
             str(job_id),
             _job_id=queue_job_id,
         )
-        return job.job_id if job is not None else None
-
-    async def enqueue_places_search_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"places.search:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_places_search_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None
-
-    async def enqueue_movie_showings_search_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"movie_showings.search:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_movie_showings_search_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None
-
-    async def enqueue_movies_search_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"movies.search:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_movies_search_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None
-
-    async def enqueue_news_search_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"news.search:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_news_search_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None
-
-    async def enqueue_lists_search_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"lists.search:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_lists_search_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None
-
-    async def enqueue_transit_routing_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"routing.transit.plan:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_transit_routing_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None
-
-    async def enqueue_street_routing_job(self, job_id: UUID) -> str | None:
-        queue_job_id = f"routing.street.plan:{job_id}"
-        job = await self.redis.enqueue_job(
-            "process_street_routing_job",
-            str(job_id),
-            _job_id=queue_job_id,
-        )
-        return job.job_id if job is not None else None

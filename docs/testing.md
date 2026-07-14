@@ -20,7 +20,11 @@ python -m pytest -q
 
 The MCP-specific suite verifies the exact tool catalog, actual schemas through
 `fastmcp.Client`, cross-field validation, serializers, response caps,
-conditional routing visibility and the committed reference snapshot.
+conditional routing visibility and the committed reference snapshot. Queue
+lifecycle tests also verify commit-before-enqueue ordering, generic worker
+registration, enqueue failures, persisted result restoration, MCP timeout and
+cancellation behavior, closed DB sessions during worker waits, and hidden
+FastMCP `Context` injection.
 
 Inspect and persist the actual schemas with:
 
@@ -51,8 +55,10 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1
 
 ## 3. MCP calls
 
-The in-memory and stdio checks require PostgreSQL but do not require Uvicorn or
-the ARQ worker. The HTTP check requires Uvicorn on port 8011.
+All MCP checks require PostgreSQL, Redis and the arq worker. The HTTP check also
+requires Uvicorn on port 8011. In-memory and stdio start their own FastMCP
+server lifespans and Redis pools, but application commands still execute only
+in the external worker.
 
 The stdio entrypoint always disables SQLAlchemy query echo because stdout is
 reserved exclusively for MCP JSON-RPC messages. Other logs must use stderr.

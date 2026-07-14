@@ -15,35 +15,37 @@
 | `integrations` | independent KudaGo, Nominatim, Transitous and OpenRouteService HTTP clients |
 | `core` | configuration, database engine and Redis pool |
 
-## Queued Command Flow
+## Shared Queued Command Flow
 
 ```text
-POST /api/v1/events/search
-  -> validate EventsSearchRequest
-  -> save api_request and queued job
-  -> enqueue process_events_search_job in Redis
-  -> return job_id
+REST ─┐
+      ├→ api_request → job → Redis → arq → CommandExecutor
+MCP ──┘
 
-arq worker
-  -> mark job running
-  -> CommandExecutor
-  -> command handler
-  -> services
-  -> call KudaGo and optionally Nominatim
-  -> record upstream_calls
-  -> save command_results and job_events
-  -> mark job succeeded or failed
-
-client
-  -> GET /api/v1/jobs/{job_id}
-  -> GET /api/v1/jobs/{job_id}/results
+REST → queued response
+MCP  → await worker → load persisted CommandOutput → MCP serializer → result
 ```
+
+Both transports use `JobDispatchService`. It creates the `api_request`, job and
+`queued` event, commits PostgreSQL, and only then enqueues
+`process_command_job` in Redis. After enqueue succeeds, it saves
+`queue_job_id`, adds the `enqueued` event and commits again. A Redis failure or
+duplicate arq job ID marks the persisted job `failed` with an
+`enqueue_failed` event instead of leaving it queued forever.
+
+The worker receives only `job_id`; the authoritative application command and
+payload are loaded from PostgreSQL. It records `started`, executes the shared
+`CommandExecutor`, persists `command_results` and diagnostics, and finishes
+with `completed` or `failed`.
 
 ```mermaid
 flowchart LR
-    C[HTTP client] --> API[FastAPI router]
-    API --> DB[(PostgreSQL)]
-    API --> Q[(Redis queue)]
+    REST[REST client] --> API[FastAPI router]
+    MCP[MCP client] --> FM[FastMCP tool]
+    API --> D[JobDispatchService]
+    FM --> D
+    D --> DB[(PostgreSQL commit)]
+    DB --> Q[(Redis queue)]
     Q --> W[arq worker]
     W --> CE[CommandExecutor]
     CE --> H[Command handler]
@@ -52,45 +54,46 @@ flowchart LR
     LR --> GC[(Geo cache)]
     LR --> NM[Nominatim API]
     CE --> DB
-    DB --> C
+    API --> REST
+    DB --> FM
+    FM --> MCP
 ```
 
 ## MCP Command Flow
 
-MCP tools use the same executor and handlers, but execute inline instead of
-using Redis and the arq worker:
+MCP tools validate and map agent-facing inputs, then use the same dispatcher and
+worker as REST. The MCP process never invokes application handlers or external
+APIs directly:
 
 ```text
 MCP client
   -> FastMCP tool over /mcp or stdio
   -> agent schema validation and application-payload mapping
-  -> create job with method=MCP
-  -> CommandExecutor inline
-  -> command handler
-  -> services
-  -> KudaGo / Nominatim
-  -> upstream_calls + command_results + job_events
-  -> commit full diagnostics and result
+  -> create and commit job with method=MCP
+  -> enqueue process_command_job
+  -> close DB session
+  -> await ArqJob.result()
+  -> open a new DB session and load job + command_result
   -> agent serializer and response-size cap
   -> return the MCP envelope
 ```
 
-The shared command layer keeps transport-specific code limited to validation,
-job submission/execution mode, payload mapping and response serialization.
-MCP serializers never mutate the persisted `CommandOutput.result_payload`.
+Timeout does not cancel the queued job, and client cancellation is not
+translated to `ArqJob.abort()`. There is no inline fallback when Redis or the
+worker is unavailable. MCP serializers never mutate the persisted
+`CommandOutput.result_payload`.
 
-Routing follows the same split. REST endpoints enqueue
-`routing.transit.plan` or `routing.street.plan`; MCP tools execute those exact
-commands inline. `TransitRoutingService` and `StreetRoutingService` normalize
-provider responses and write `upstream_calls`, while `CommandExecutor` owns the
-common job, result and event lifecycle. Neither routing service invokes the
-other and neither performs geocoding.
+Routing follows the same queue. Both REST and MCP enqueue
+`routing.transit.plan` or `routing.street.plan`; `TransitRoutingService` and
+`StreetRoutingService` normalize provider responses and write `upstream_calls`
+inside the worker, while `CommandExecutor` owns the common result and event
+lifecycle. Neither routing service invokes the other or performs geocoding.
 
 ## Synchronous Reads
 
 REST reference and object-detail GET endpoints intentionally remain direct,
 synchronous and untracked. They do not create jobs or write diagnostics. MCP
-`get_details` is tracked through the inline command flow; reference data is a
+`get_details` is tracked through the queued command flow; reference data is a
 committed schema snapshot and has no public MCP tool.
 
 Небольшие справочные и detail-запросы выполняются без Redis:
@@ -141,6 +144,8 @@ upstream diagnostics remain unchanged in PostgreSQL.
 
 - Ошибка внешнего API переводит job в `failed` и сохраняется в job events и
   upstream calls.
+- Ошибка постановки в Redis переводит уже закоммиченную job в `failed` и
+  добавляет `enqueue_failed`.
 - Неоднозначный или отсутствующий geo result считается обработанным результатом:
   job получает `succeeded`, а `result_payload.status` объясняет ограничение.
 - Кэшированные geo results не появляются в upstream calls, потому что внешнего

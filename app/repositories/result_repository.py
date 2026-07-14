@@ -36,3 +36,15 @@ class ResultRepository:
             .order_by(CommandResult.created_at.asc())
         )
         return list(result.scalars().all())
+
+    async def get_latest_by_job_id(
+        self,
+        job_id: uuid.UUID,
+    ) -> CommandResult | None:
+        result = await self.session.execute(
+            select(CommandResult)
+            .where(CommandResult.job_id == job_id)
+            .order_by(CommandResult.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()

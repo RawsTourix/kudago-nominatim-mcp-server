@@ -1,4 +1,8 @@
 import os
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 
 os.environ.setdefault(
@@ -13,3 +17,19 @@ os.environ.setdefault(
     "OPENROUTESERVICE_USER_AGENT",
     "kudago-nominatim-tests/0.1.0",
 )
+
+
+@pytest.fixture
+def fake_mcp_redis(monkeypatch):
+    from app.mcp import server
+
+    redis = SimpleNamespace(name="test-arq-redis")
+    create_pool = AsyncMock(return_value=redis)
+    close_pool = AsyncMock()
+    monkeypatch.setattr(server, "create_arq_pool", create_pool)
+    monkeypatch.setattr(server, "close_arq_pool", close_pool)
+    return SimpleNamespace(
+        redis=redis,
+        create_pool=create_pool,
+        close_pool=close_pool,
+    )

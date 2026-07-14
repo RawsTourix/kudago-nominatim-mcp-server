@@ -34,9 +34,12 @@ OLD_TOOLS = {
 
 
 @pytest.mark.asyncio
-async def test_fully_configured_catalog_contains_exactly_ten_agent_tools():
+async def test_fully_configured_catalog_contains_exactly_ten_agent_tools(
+    fake_mcp_redis,
+):
     server = create_mcp_server(
         settings_obj=SimpleNamespace(
+            redis_url="redis://test:6379/0",
             transitous_user_agent="tests/1.0 tests@example.com",
             openrouteservice_api_key="test-key",
         )
@@ -53,3 +56,4 @@ async def test_fully_configured_catalog_contains_exactly_ten_agent_tools():
         assert tool.annotations.destructiveHint is False
         assert tool.annotations.idempotentHint is True
         assert tool.annotations.openWorldHint is True
+        assert "ctx" not in tool.inputSchema.get("properties", {})

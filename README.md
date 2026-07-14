@@ -8,9 +8,12 @@ The service exposes one application command layer through two contracts:
   while reference and object GET endpoints remain synchronous and untracked;
 - an agent-facing FastMCP v2 facade over streamable HTTP at `/mcp` or stdio.
 
-MCP commands execute inline, create jobs with method `MCP`, and persist command
-results, job events, and upstream-call diagnostics before returning a result.
+REST and MCP application commands share one queued execution lifecycle:
+PostgreSQL job → Redis → arq worker → `CommandExecutor`. REST returns the queued
+job immediately; MCP waits for the worker and returns an agent-facing result.
 See [docs/mcp.md](docs/mcp.md) for the tool catalog and response envelope.
+
+> An arq worker is required to execute MCP tools as well as queued REST commands.
 
 Асинхронный FastAPI-сервис для поиска событий, мест, фильмов, киносеансов,
 новостей и подборок KudaGo. Названия населённых пунктов сопоставляются со
@@ -38,17 +41,15 @@ OpenRouteService — маршруты пешком, на велосипеде и
 
 ## Architecture
 
-Основной поток фоновой команды:
+Единый поток application-команды:
 
 ```text
-HTTP request
-  -> FastAPI router
-  -> api_request + job в PostgreSQL
-  -> Redis queue
-  -> arq worker
-  -> KudaGo / Nominatim
-  -> upstream_calls + command_results + job_events
-  -> job succeeded / failed
+REST ─┐
+      ├→ api_request → job → Redis → arq → CommandExecutor
+MCP ──┘
+
+REST → queued response
+MCP  → await worker → MCP serializer → result
 ```
 
 Подробнее: [docs/architecture.md](docs/architecture.md).
@@ -116,6 +117,7 @@ Copy-Item .env.example .env
 |---|---|
 | `DATABASE_URL` | asyncpg URL подключения к PostgreSQL |
 | `REDIS_URL` | Redis database для arq |
+| `MCP_JOB_WAIT_TIMEOUT_SECONDS` | максимальное ожидание worker для MCP-вызова; по умолчанию 180 секунд |
 | `KUDAGO_BASE_URL` | базовый URL KudaGo API |
 | `KUDAGO_LANG` | язык запросов KudaGo |
 | `KUDAGO_USER_AGENT` | User-Agent клиента KudaGo |
@@ -185,7 +187,8 @@ http://127.0.0.1:8011/redoc
 arq app.workers.worker_settings.WorkerSettings
 ```
 
-API и worker должны использовать одинаковые `DATABASE_URL` и `REDIS_URL`.
+API, MCP transport и worker должны использовать одинаковые `DATABASE_URL` и
+`REDIS_URL`. Worker обязателен для queued REST endpoints и всех MCP tools.
 
 ## Database Migrations
 
@@ -258,7 +261,8 @@ GET /api/v1/jobs/{job_id}/upstream-calls
 powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1
 ```
 
-Run the MCP checks after PostgreSQL is available and migrations are applied:
+Run the MCP checks after PostgreSQL and Redis are available, migrations are
+applied, and the arq worker is running:
 
 ```powershell
 python scripts/test_mcp_inmemory.py
@@ -298,5 +302,4 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1 `
 - автоматические unit и integration tests;
 - аутентификация и ограничение debug endpoints;
 - контейнеризация API и worker;
-- retry/backoff и метрики внешних запросов;
-- сокращение повторяющегося orchestration-кода worker-задач.
+- retry/backoff и метрики внешних запросов.

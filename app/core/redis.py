@@ -22,8 +22,8 @@ def get_redis_settings(redis_url: str | None = None) -> RedisSettings:
     )
 
 
-async def create_arq_pool() -> ArqRedis:
-    return await create_pool(get_redis_settings())
+async def create_arq_pool(redis_url: str | None = None) -> ArqRedis:
+    return await create_pool(get_redis_settings(redis_url))
 
 
 async def close_arq_pool(redis: ArqRedis) -> None:

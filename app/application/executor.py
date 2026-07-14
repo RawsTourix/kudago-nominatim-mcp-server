@@ -53,13 +53,36 @@ class CommandExecutor:
             raise ValueError(f"Job not found: {job_id}")
 
         if job.status == "succeeded" and job.result_payload is not None:
-            return self._completed_output(job.command, job.result_payload)
+            return await self.load_completed_output(job_id)
 
         return await self.run_payload(
             job_id=job.id,
             command=job.command,
             payload=job.input_payload,
             source=source,
+        )
+
+    async def load_completed_output(self, job_id: UUID) -> CommandOutput:
+        job = await self.job_repo.get_by_id(job_id)
+
+        if job is None:
+            raise ValueError(f"Job not found: {job_id}")
+
+        if job.status != "succeeded" or job.result_payload is None:
+            raise ValueError(
+                f"Job is not completed successfully: {job_id}; status={job.status}"
+            )
+
+        result = await self.result_repo.get_latest_by_job_id(job_id)
+        if result is None:
+            return self._completed_output(job.command, job.result_payload)
+
+        return CommandOutput(
+            status=str(job.result_payload.get("status", "ok")),
+            result_type=result.result_type,
+            items=result.items,
+            meta=result.meta,
+            result_payload=job.result_payload,
         )
 
     async def run_payload(

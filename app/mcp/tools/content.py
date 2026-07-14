@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from app.mcp.executor import run_mcp_command
@@ -37,6 +37,7 @@ def register_content_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def find_city_news(
+        ctx: Context,
         city: CityInput = None,
         location_slug: LocationSlugInput = None,
         only_current: OnlyCurrentInput = True,
@@ -70,6 +71,7 @@ def register_content_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/find_city_news",
             command="news.search",
@@ -93,6 +95,7 @@ def register_content_tools(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def find_city_guides(
+        ctx: Context,
         city: CityInput = None,
         location_slug: LocationSlugInput = None,
         page: PageInput = 1,
@@ -123,6 +126,7 @@ def register_content_tools(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/find_city_guides",
             command="lists.search",

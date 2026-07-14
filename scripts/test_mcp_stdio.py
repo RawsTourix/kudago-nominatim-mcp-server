@@ -24,13 +24,9 @@ def parse_args() -> argparse.Namespace:
 
 def subprocess_environment() -> dict[str, str]:
     env = dict(os.environ)
-    env.update(
-        {
-            key: value
-            for key, value in dotenv_values(ROOT / ".env").items()
-            if value is not None
-        }
-    )
+    for key, value in dotenv_values(ROOT / ".env").items():
+        if value is not None:
+            env.setdefault(key, value)
     return env
 
 

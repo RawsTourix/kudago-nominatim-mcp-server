@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from app.core.config import Settings, settings
@@ -63,6 +63,7 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def plan_public_transport(
+        ctx: Context,
         origin: OriginInput,
         destination: DestinationInput,
         departure_time: DepartureTimeInput = None,
@@ -106,6 +107,7 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/plan_public_transport",
             command="routing.transit.plan",
@@ -122,6 +124,7 @@ def _register_street_route_tool(mcp: FastMCP) -> None:
         version=MCP_FACADE_VERSION,
     )
     async def plan_street_route(
+        ctx: Context,
         origin: OriginInput,
         destination: DestinationInput,
         mode: StreetModeInput = StreetTravelMode.WALKING,
@@ -151,6 +154,7 @@ def _register_street_route_tool(mcp: FastMCP) -> None:
             return validation_error(tool_name, exc)
 
         return await run_mcp_command(
+            redis=ctx.lifespan_context["arq_redis"],
             tool_name=tool_name,
             endpoint="mcp://tools/plan_street_route",
             command="routing.street.plan",

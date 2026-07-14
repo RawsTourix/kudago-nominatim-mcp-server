@@ -13,3 +13,4 @@ def test_routing_user_agents_do_not_break_existing_environment(monkeypatch):
     assert config.openrouteservice_user_agent == (
         "kudago-nominatim-service/0.1.0"
     )
+    assert config.mcp_job_wait_timeout_seconds == 180.0

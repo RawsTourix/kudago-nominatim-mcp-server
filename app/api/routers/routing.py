@@ -6,8 +6,7 @@ from app.schemas.routing import (
     StreetRouteRequest,
     TransitRouteRequest,
 )
-from app.services.job_service import JobService
-from app.services.queue_service import QueueService
+from app.services.job_dispatch_service import JobDispatchService
 
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -19,8 +18,7 @@ async def plan_transit_route(
     session: DbSession,
     redis: ArqPool,
 ):
-    job_service = JobService(session)
-    job = await job_service.create_job_from_api_request(
+    dispatch = await JobDispatchService(session, redis).create_and_enqueue(
         endpoint="/api/v1/routing/transit",
         method="POST",
         command="routing.transit.plan",
@@ -28,17 +26,11 @@ async def plan_transit_route(
         request_text=_request_text(payload),
     )
 
-    queue_job_id = await QueueService(redis).enqueue_transit_routing_job(job.id)
-    await job_service.mark_enqueued(
-        job_id=job.id,
-        queue_job_id=queue_job_id,
-    )
-    await session.commit()
     return RoutingQueuedResponse(
         status="ok",
-        job_id=job.id,
-        queue_job_id=queue_job_id,
-        enqueued=queue_job_id is not None,
+        job_id=dispatch.job.id,
+        queue_job_id=dispatch.arq_job.job_id,
+        enqueued=True,
     )
 
 
@@ -48,8 +40,7 @@ async def plan_street_route(
     session: DbSession,
     redis: ArqPool,
 ):
-    job_service = JobService(session)
-    job = await job_service.create_job_from_api_request(
+    dispatch = await JobDispatchService(session, redis).create_and_enqueue(
         endpoint="/api/v1/routing/street",
         method="POST",
         command="routing.street.plan",
@@ -57,17 +48,11 @@ async def plan_street_route(
         request_text=_request_text(payload),
     )
 
-    queue_job_id = await QueueService(redis).enqueue_street_routing_job(job.id)
-    await job_service.mark_enqueued(
-        job_id=job.id,
-        queue_job_id=queue_job_id,
-    )
-    await session.commit()
     return RoutingQueuedResponse(
         status="ok",
-        job_id=job.id,
-        queue_job_id=queue_job_id,
-        enqueued=queue_job_id is not None,
+        job_id=dispatch.job.id,
+        queue_job_id=dispatch.arq_job.job_id,
+        enqueued=True,
     )
 
 
