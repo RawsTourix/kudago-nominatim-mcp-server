@@ -1,3 +1,4 @@
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,7 +9,9 @@ class Settings(BaseSettings):
 
     database_url: str
     redis_url: str = "redis://localhost:6379/0"
-    mcp_job_wait_timeout_seconds: float = 180.0
+    command_job_timeout_seconds: float = Field(default=120.0, gt=0)
+    arq_job_timeout_seconds: float = Field(default=135.0, gt=0)
+    mcp_job_wait_timeout_seconds: float = Field(default=180.0, gt=0)
 
     kudago_base_url: str = "https://kudago.com/public-api/v1.4/"
     kudago_lang: str = "ru"
@@ -27,6 +30,15 @@ class Settings(BaseSettings):
     openrouteservice_api_key: str | None = None
     openrouteservice_user_agent: str = "kudago-nominatim-service/0.1.0"
     openrouteservice_timeout_seconds: float = 30.0
+
+    @model_validator(mode="after")
+    def validate_job_timeouts(self) -> "Settings":
+        if self.command_job_timeout_seconds >= self.arq_job_timeout_seconds:
+            raise ValueError(
+                "COMMAND_JOB_TIMEOUT_SECONDS must be less than "
+                "ARQ_JOB_TIMEOUT_SECONDS"
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

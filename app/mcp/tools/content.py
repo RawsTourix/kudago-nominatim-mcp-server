@@ -72,6 +72,9 @@ def register_content_tools(mcp: FastMCP) -> None:
 
         return await run_mcp_command(
             redis=ctx.lifespan_context["arq_redis"],
+            wait_timeout_seconds=ctx.lifespan_context[
+                "mcp_job_wait_timeout_seconds"
+            ],
             tool_name=tool_name,
             endpoint="mcp://tools/find_city_news",
             command="news.search",
@@ -127,6 +130,9 @@ def register_content_tools(mcp: FastMCP) -> None:
 
         return await run_mcp_command(
             redis=ctx.lifespan_context["arq_redis"],
+            wait_timeout_seconds=ctx.lifespan_context[
+                "mcp_job_wait_timeout_seconds"
+            ],
             tool_name=tool_name,
             endpoint="mcp://tools/find_city_guides",
             command="lists.search",

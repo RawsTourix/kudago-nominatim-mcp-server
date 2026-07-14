@@ -6,7 +6,7 @@ from app.workers.worker_settings import WorkerSettings
 def test_generic_worker_functions_are_registered_without_timeout_changes():
     assert WorkerSettings.functions == [process_test_job, process_command_job]
     assert WorkerSettings.max_jobs == 10
-    assert WorkerSettings.job_timeout == 120
+    assert WorkerSettings.job_timeout == 135.0
     assert WorkerSettings.keep_result == 3600
 
 

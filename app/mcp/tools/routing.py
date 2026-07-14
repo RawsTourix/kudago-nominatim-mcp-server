@@ -108,6 +108,9 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
 
         return await run_mcp_command(
             redis=ctx.lifespan_context["arq_redis"],
+            wait_timeout_seconds=ctx.lifespan_context[
+                "mcp_job_wait_timeout_seconds"
+            ],
             tool_name=tool_name,
             endpoint="mcp://tools/plan_public_transport",
             command="routing.transit.plan",
@@ -155,6 +158,9 @@ def _register_street_route_tool(mcp: FastMCP) -> None:
 
         return await run_mcp_command(
             redis=ctx.lifespan_context["arq_redis"],
+            wait_timeout_seconds=ctx.lifespan_context[
+                "mcp_job_wait_timeout_seconds"
+            ],
             tool_name=tool_name,
             endpoint="mcp://tools/plan_street_route",
             command="routing.street.plan",

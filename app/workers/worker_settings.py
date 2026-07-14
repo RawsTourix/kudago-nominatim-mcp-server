@@ -1,3 +1,4 @@
+from app.core.config import settings
 from app.core.redis import get_redis_settings
 from app.workers.tasks import (
     process_command_job,
@@ -14,5 +15,5 @@ class WorkerSettings:
     redis_settings = get_redis_settings()
 
     max_jobs = 10
-    job_timeout = 120
+    job_timeout = settings.arq_job_timeout_seconds
     keep_result = 3600

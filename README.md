@@ -115,6 +115,8 @@ Copy-Item .env.example .env
 
 | Variable | Purpose |
 |---|---|
+| `COMMAND_JOB_TIMEOUT_SECONDS` | internal command-execution budget; 120 seconds by default |
+| `ARQ_JOB_TIMEOUT_SECONDS` | arq hard timeout; must exceed the command budget; 135 seconds by default |
 | `DATABASE_URL` | asyncpg URL подключения к PostgreSQL |
 | `REDIS_URL` | Redis database для arq |
 | `MCP_JOB_WAIT_TIMEOUT_SECONDS` | максимальное ожидание worker для MCP-вызова; по умолчанию 180 секунд |

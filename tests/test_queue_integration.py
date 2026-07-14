@@ -10,7 +10,7 @@ from fastmcp import Client
 from app.application.contracts import CommandOutput
 from app.application.executor import HANDLERS
 from app.core.config import settings
-from app.core.db import AsyncSessionLocal
+from app.core.db import AsyncSessionLocal, engine
 from app.core.redis import create_arq_pool
 from app.mcp.server import create_mcp_server
 from app.repositories.job_repository import JobRepository
@@ -23,6 +23,12 @@ pytestmark = pytest.mark.skipif(
     os.getenv("KUDAGO_RUN_QUEUE_INTEGRATION") != "1",
     reason="set KUDAGO_RUN_QUEUE_INTEGRATION=1 with PostgreSQL and Redis available",
 )
+
+
+@pytest.fixture(autouse=True)
+async def dispose_database_pool_after_test():
+    yield
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -108,3 +114,64 @@ async def test_mcp_command_runs_through_real_redis_worker_and_persists_once(
 
     assert len(repeated_results) == 1
     assert sources == ["worker"]
+
+
+@pytest.mark.asyncio
+async def test_hanging_handler_fails_job_without_persisting_command_result(
+    monkeypatch,
+):
+    class HangingGeoResolveHandler:
+        command = "geo.resolve"
+
+        def __init__(self, session):
+            self.session = session
+
+        async def run(self, context, payload):
+            await asyncio.Event().wait()
+
+    monkeypatch.setitem(HANDLERS, "geo.resolve", HangingGeoResolveHandler)
+    monkeypatch.setattr(settings, "command_job_timeout_seconds", 0.05)
+    worker_redis = await create_arq_pool(settings.redis_url)
+    worker = Worker(
+        [process_command_job],
+        redis_pool=worker_redis,
+        handle_signals=False,
+        poll_delay=0.01,
+        job_timeout=settings.arq_job_timeout_seconds,
+        keep_result=3600,
+    )
+    worker_task = asyncio.create_task(worker.async_run())
+
+    try:
+        async with Client(create_mcp_server()) as client:
+            result = await client.call_tool(
+                "resolve_location",
+                {"place": "Hanging Integration City", "limit": 1},
+            )
+    finally:
+        await worker.close()
+        with suppress(asyncio.CancelledError):
+            await worker_task
+
+    assert result.data["status"] == "error"
+    assert result.data["error_type"] == "CommandTimeoutError"
+    assert result.data["message"] == "Command execution exceeded its timeout."
+
+    job_id = UUID(result.data["job_id"])
+    async with AsyncSessionLocal() as session:
+        job = await JobService(session).get_by_id(job_id)
+        events = await JobRepository(session).get_events(job_id)
+        command_results = await ResultRepository(session).get_by_job_id(job_id)
+
+    assert job is not None
+    assert job.status == "failed"
+    assert job.error_type == "CommandTimeoutError"
+    assert job.error_message == "Command execution exceeded its timeout."
+    assert [event.event_type for event in events] == [
+        "queued",
+        "enqueued",
+        "failed",
+    ]
+    assert events[-1].message == "Command execution timed out"
+    assert events[-1].data == {"error_type": "CommandTimeoutError"}
+    assert command_results == []

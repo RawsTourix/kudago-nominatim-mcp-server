@@ -90,6 +90,9 @@ def register_discovery_tools(mcp: FastMCP) -> None:
 
         return await run_mcp_command(
             redis=ctx.lifespan_context["arq_redis"],
+            wait_timeout_seconds=ctx.lifespan_context[
+                "mcp_job_wait_timeout_seconds"
+            ],
             tool_name=tool_name,
             endpoint="mcp://tools/resolve_location",
             command="geo.resolve",
@@ -172,6 +175,9 @@ def register_discovery_tools(mcp: FastMCP) -> None:
 
         return await run_mcp_command(
             redis=ctx.lifespan_context["arq_redis"],
+            wait_timeout_seconds=ctx.lifespan_context[
+                "mcp_job_wait_timeout_seconds"
+            ],
             tool_name=tool_name,
             endpoint="mcp://tools/find_events",
             command="events.search",
@@ -246,6 +252,9 @@ def register_discovery_tools(mcp: FastMCP) -> None:
 
         return await run_mcp_command(
             redis=ctx.lifespan_context["arq_redis"],
+            wait_timeout_seconds=ctx.lifespan_context[
+                "mcp_job_wait_timeout_seconds"
+            ],
             tool_name=tool_name,
             endpoint="mcp://tools/find_places",
             command="places.search",

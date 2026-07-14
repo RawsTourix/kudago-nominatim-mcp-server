@@ -35,6 +35,7 @@ async def test_routing_tools_use_shared_mcp_executor(
     server = create_mcp_server(
         settings_obj=SimpleNamespace(
             redis_url="redis://test:6379/0",
+            mcp_job_wait_timeout_seconds=180.0,
             transitous_user_agent="tests/1.0 tests@example.com",
             openrouteservice_api_key="test-key",
         )

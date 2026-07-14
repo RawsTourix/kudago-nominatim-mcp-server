@@ -17,7 +17,12 @@ def create_mcp_server(*, settings_obj: Settings = settings) -> FastMCP:
     async def mcp_lifespan(server):
         redis = await create_arq_pool(settings_obj.redis_url)
         try:
-            yield {"arq_redis": redis}
+            yield {
+                "arq_redis": redis,
+                "mcp_job_wait_timeout_seconds": (
+                    settings_obj.mcp_job_wait_timeout_seconds
+                ),
+            }
         finally:
             await close_arq_pool(redis)
 

@@ -34,9 +34,18 @@ duplicate arq job ID marks the persisted job `failed` with an
 `enqueue_failed` event instead of leaving it queued forever.
 
 The worker receives only `job_id`; the authoritative application command and
-payload are loaded from PostgreSQL. It records `started`, executes the shared
-`CommandExecutor`, persists `command_results` and diagnostics, and finishes
-with `completed` or `failed`.
+payload are loaded from PostgreSQL. Before execution, it waits up to three
+seconds for the separately committed `queue_job_id`; every poll uses a fresh
+database session so the `enqueued` event is visible before `started`. Missing
+dispatch metadata fails the job with `DispatchMetadataMissingError`. The worker
+then records `started`, executes the shared `CommandExecutor`, persists
+`command_results` and diagnostics, and finishes with `completed` or `failed`.
+
+Command execution has a 120-second internal budget. Its timeout is recorded in
+a separate database session as `CommandTimeoutError`, after rolling back the
+cancelled execution transaction. The arq hard timeout is 135 seconds, leaving
+headroom to persist that terminal state. Both values are configurable, and the
+internal command timeout must remain lower than the arq timeout.
 
 ```mermaid
 flowchart LR
@@ -153,3 +162,6 @@ upstream diagnostics remain unchanged in PostgreSQL.
 - `no_route` is a completed domain result, so the job is `succeeded`.
   Timeouts, transport failures, HTTP 429/5xx, invalid provider responses and
   routing configuration failures make the job `failed`.
+- Missing committed dispatch metadata fails the job with
+  `DispatchMetadataMissingError`; an exhausted command budget fails it with
+  `CommandTimeoutError` and does not persist a `command_result`.

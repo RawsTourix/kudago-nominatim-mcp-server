@@ -12,6 +12,7 @@ def fully_configured_server():
     return create_mcp_server(
         settings_obj=SimpleNamespace(
             redis_url="redis://test:6379/0",
+            mcp_job_wait_timeout_seconds=23.5,
             transitous_user_agent="tests/1.0 tests@example.com",
             openrouteservice_api_key="test-key",
         )
@@ -78,6 +79,7 @@ async def test_find_events_maps_ekb_calendar_date_with_snapshot_timezone(
     assert result.data["status"] == "ok"
     kwargs = run.await_args.kwargs
     assert kwargs["redis"] is fake_mcp_redis.redis
+    assert kwargs["wait_timeout_seconds"] == 23.5
     assert kwargs["payload"]["actual_since"] == 1783969200
     assert kwargs["payload"]["actual_until"] == 1784055599
     assert kwargs["data_factory"].keywords["applied_timezone"] == (

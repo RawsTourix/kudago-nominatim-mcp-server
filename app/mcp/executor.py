@@ -6,7 +6,6 @@ from arq.connections import ArqRedis
 
 from app.application.contracts import CommandOutput
 from app.application.executor import CommandExecutor
-from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.mcp.envelopes import mcp_error, mcp_ok
 from app.mcp.normalization import compact_geo, compact_mcp_data, compact_mcp_meta
@@ -23,6 +22,7 @@ async def run_mcp_command(
     endpoint: str,
     command: str,
     payload: dict[str, Any],
+    wait_timeout_seconds: float,
     request_text: str | None = None,
     geo_factory: Callable[[CommandOutput], dict[str, Any] | None] | None = None,
     data_factory: Callable[[CommandOutput], dict[str, Any]] | None = None,
@@ -51,9 +51,20 @@ async def run_mcp_command(
 
     try:
         await dispatched.arq_job.result(
-            timeout=settings.mcp_job_wait_timeout_seconds,
+            timeout=wait_timeout_seconds,
         )
-    except TimeoutError:
+    except TimeoutError as exc:
+        async with AsyncSessionLocal() as session:
+            job = await JobService(session).get_by_id(dispatched.job.id)
+
+        if job is not None and job.status == "failed":
+            return mcp_error(
+                tool=tool_name,
+                job_id=job.id,
+                error_type=job.error_type or exc.__class__.__name__,
+                message=job.error_message or str(exc),
+                retryable=False,
+            )
         return mcp_error(
             tool=tool_name,
             job_id=dispatched.job.id,

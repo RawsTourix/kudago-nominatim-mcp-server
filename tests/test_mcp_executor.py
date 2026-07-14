@@ -92,6 +92,7 @@ async def test_mcp_queues_waits_without_open_session_and_loads_persisted_output(
 
     result = await executor.run_mcp_command(
         redis=redis,
+        wait_timeout_seconds=17.5,
         tool_name="find_events",
         endpoint="mcp://tools/find_events",
         command="events.search",
@@ -109,7 +110,7 @@ async def test_mcp_queues_waits_without_open_session_and_loads_persisted_output(
         request_text=None,
     )
     state.arq_job.result.assert_awaited_once_with(
-        timeout=executor.settings.mcp_job_wait_timeout_seconds
+        timeout=17.5
     )
     state.command_executor.load_completed_output.assert_awaited_once_with(
         state.job.id
@@ -119,7 +120,7 @@ async def test_mcp_queues_waits_without_open_session_and_loads_persisted_output(
     assert state.events == [
         "dispatch:enter",
         "dispatch:exit",
-        f"wait:{executor.settings.mcp_job_wait_timeout_seconds}",
+        "wait:17.5",
         "load:enter",
         "load:exit",
     ]
@@ -130,7 +131,10 @@ async def test_mcp_timeout_returns_non_retryable_error_without_aborting_job(
     monkeypatch,
 ):
     events: list[str] = []
-    session = _SessionContext("dispatch", events)
+    sessions = [
+        _SessionContext("dispatch", events),
+        _SessionContext("pending-job", events),
+    ]
     job = SimpleNamespace(id=uuid4())
     arq_job = SimpleNamespace(
         job_id=f"events.search:{job.id}",
@@ -142,15 +146,22 @@ async def test_mcp_timeout_returns_non_retryable_error_without_aborting_job(
             return_value=SimpleNamespace(job=job, arq_job=arq_job)
         )
     )
-    monkeypatch.setattr(executor, "AsyncSessionLocal", lambda: session)
+    job_service = SimpleNamespace(
+        get_by_id=AsyncMock(
+            return_value=SimpleNamespace(id=job.id, status="running")
+        )
+    )
+    monkeypatch.setattr(executor, "AsyncSessionLocal", lambda: sessions.pop(0))
     monkeypatch.setattr(
         executor,
         "JobDispatchService",
         lambda session, redis: dispatch_service,
     )
+    monkeypatch.setattr(executor, "JobService", lambda session: job_service)
 
     result = await executor.run_mcp_command(
         redis=SimpleNamespace(),
+        wait_timeout_seconds=17.5,
         tool_name="find_events",
         endpoint="mcp://tools/find_events",
         command="events.search",
@@ -169,6 +180,7 @@ async def test_mcp_timeout_returns_non_retryable_error_without_aborting_job(
         "retryable": False,
     }
     arq_job.abort.assert_not_awaited()
+    job_service.get_by_id.assert_awaited_once_with(job.id)
 
 
 @pytest.mark.asyncio
@@ -204,6 +216,7 @@ async def test_mcp_worker_error_uses_failed_job_diagnostics(monkeypatch):
 
     result = await executor.run_mcp_command(
         redis=SimpleNamespace(),
+        wait_timeout_seconds=17.5,
         tool_name="find_events",
         endpoint="mcp://tools/find_events",
         command="events.search",
@@ -240,6 +253,7 @@ async def test_mcp_cancellation_propagates_without_aborting_worker_job(monkeypat
     with pytest.raises(asyncio.CancelledError):
         await executor.run_mcp_command(
             redis=SimpleNamespace(),
+            wait_timeout_seconds=17.5,
             tool_name="find_events",
             endpoint="mcp://tools/find_events",
             command="events.search",
@@ -262,6 +276,7 @@ async def test_mcp_serialization_failure_logs_traceback_but_returns_safe_error(
     with caplog.at_level(logging.ERROR, logger="app.mcp.executor"):
         result = await executor.run_mcp_command(
             redis=SimpleNamespace(),
+            wait_timeout_seconds=17.5,
             tool_name="find_events",
             endpoint="mcp://tools/find_events",
             command="events.search",

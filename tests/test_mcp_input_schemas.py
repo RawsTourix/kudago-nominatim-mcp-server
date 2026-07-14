@@ -13,6 +13,7 @@ async def test_actual_fastmcp_schemas_describe_every_public_property(fake_mcp_re
     server = create_mcp_server(
         settings_obj=SimpleNamespace(
             redis_url="redis://test:6379/0",
+            mcp_job_wait_timeout_seconds=180.0,
             transitous_user_agent="tests/1.0 tests@example.com",
             openrouteservice_api_key="test-key",
         )
@@ -32,6 +33,7 @@ async def test_actual_fastmcp_schemas_expose_reference_enums_and_units(
     server = create_mcp_server(
         settings_obj=SimpleNamespace(
             redis_url="redis://test:6379/0",
+            mcp_job_wait_timeout_seconds=180.0,
             transitous_user_agent="tests/1.0 tests@example.com",
             openrouteservice_api_key="test-key",
         )
@@ -84,6 +86,7 @@ async def test_actual_fastmcp_schemas_expose_defaults_limits_and_public_fields_o
     server = create_mcp_server(
         settings_obj=SimpleNamespace(
             redis_url="redis://test:6379/0",
+            mcp_job_wait_timeout_seconds=180.0,
             transitous_user_agent="tests/1.0 tests@example.com",
             openrouteservice_api_key="test-key",
         )

@@ -30,10 +30,14 @@ FastMCP server owns one Redis pool per server lifespan and exposes it to tools
 through the hidden `Context` parameter; `ctx` is not part of any public tool
 schema. Application handlers and external APIs run only in the worker.
 
-MCP waits up to `MCP_JOB_WAIT_TIMEOUT_SECONDS` (180 seconds by default). A
-timeout returns `processing_timeout` with `retryable=false`, leaves the job
-queued or running, and does not abort it. Redis, worker and timeout failures
-never fall back to inline execution.
+The timeout chain is deliberately ordered: command execution uses
+`COMMAND_JOB_TIMEOUT_SECONDS` (120 seconds by default), arq enforces the hard
+`ARQ_JOB_TIMEOUT_SECONDS` limit (135 seconds), and MCP waits up to the
+server-lifespan value `MCP_JOB_WAIT_TIMEOUT_SECONDS` (180 seconds). The MCP
+value configured on a particular server instance is passed to every tool.
+An MCP wait timeout returns `processing_timeout` with `retryable=false`, leaves
+the job queued or running, and does not abort it. Redis, worker and timeout
+failures never fall back to inline execution.
 
 ## Tool catalog
 
