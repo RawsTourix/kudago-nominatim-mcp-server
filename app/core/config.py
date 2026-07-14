@@ -2,6 +2,9 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+MIN_ARQ_TIMEOUT_HEADROOM_SECONDS = 5.0
+
+
 class Settings(BaseSettings):
     app_name: str = "KudaGo FastAPI Service"
     debug: bool = False
@@ -33,10 +36,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_job_timeouts(self) -> "Settings":
-        if self.command_job_timeout_seconds >= self.arq_job_timeout_seconds:
+        headroom = (
+            self.arq_job_timeout_seconds - self.command_job_timeout_seconds
+        )
+        if headroom < MIN_ARQ_TIMEOUT_HEADROOM_SECONDS:
             raise ValueError(
-                "COMMAND_JOB_TIMEOUT_SECONDS must be less than "
-                "ARQ_JOB_TIMEOUT_SECONDS"
+                "ARQ_JOB_TIMEOUT_SECONDS must be at least 5 seconds greater "
+                "than COMMAND_JOB_TIMEOUT_SECONDS"
             )
         return self
 

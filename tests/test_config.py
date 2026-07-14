@@ -21,12 +21,15 @@ def test_routing_user_agents_do_not_break_existing_environment(monkeypatch):
     assert config.arq_job_timeout_seconds == 135.0
 
 
-def test_command_timeout_must_leave_headroom_before_arq_timeout():
+@pytest.mark.parametrize("arq_timeout", [120.0, 124.999])
+def test_command_timeout_must_leave_five_seconds_before_arq_timeout(
+    arq_timeout,
+):
     with pytest.raises(
         ValidationError,
         match=(
-            "COMMAND_JOB_TIMEOUT_SECONDS must be less than "
-            "ARQ_JOB_TIMEOUT_SECONDS"
+            "ARQ_JOB_TIMEOUT_SECONDS must be at least 5 seconds greater "
+            "than COMMAND_JOB_TIMEOUT_SECONDS"
         ),
     ):
         Settings(
@@ -34,6 +37,17 @@ def test_command_timeout_must_leave_headroom_before_arq_timeout():
             database_url=(
                 "postgresql+asyncpg://postgres:postgres@localhost/kudago"
             ),
-            command_job_timeout_seconds=135,
-            arq_job_timeout_seconds=135,
+            command_job_timeout_seconds=120,
+            arq_job_timeout_seconds=arq_timeout,
         )
+
+
+def test_exact_five_second_arq_timeout_headroom_is_valid():
+    config = Settings(
+        _env_file=None,
+        database_url="postgresql+asyncpg://postgres:postgres@localhost/kudago",
+        command_job_timeout_seconds=120,
+        arq_job_timeout_seconds=125,
+    )
+
+    assert config.arq_job_timeout_seconds == 125

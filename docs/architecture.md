@@ -36,16 +36,24 @@ duplicate arq job ID marks the persisted job `failed` with an
 The worker receives only `job_id`; the authoritative application command and
 payload are loaded from PostgreSQL. Before execution, it waits up to three
 seconds for the separately committed `queue_job_id`; every poll uses a fresh
-database session so the `enqueued` event is visible before `started`. Missing
-dispatch metadata fails the job with `DispatchMetadataMissingError`. The worker
-then records `started`, executes the shared `CommandExecutor`, persists
-`command_results` and diagnostics, and finishes with `completed` or `failed`.
+database session so the `enqueued` event is visible before `started`. The final
+metadata check locks and reloads the job before deciding whether to fail it, so
+a concurrently committed `queue_job_id` is not overwritten. Missing dispatch
+metadata fails the job with `DispatchMetadataMissingError`.
+
+The worker records `running`, `started_at`, `attempts` and the `started` event
+in a short transaction and commits it before invoking the handler. Handler
+execution and terminal persistence use a new transaction. This makes an active
+job observable and preserves `started` when execution times out. The shared
+`CommandExecutor` then persists `command_results` and diagnostics and finishes
+with `completed` or `failed`.
 
 Command execution has a 120-second internal budget. Its timeout is recorded in
 a separate database session as `CommandTimeoutError`, after rolling back the
-cancelled execution transaction. The arq hard timeout is 135 seconds, leaving
-headroom to persist that terminal state. Both values are configurable, and the
-internal command timeout must remain lower than the arq timeout.
+cancelled execution transaction; the previously committed `started` state
+remains visible. The arq hard timeout is 135 seconds, leaving headroom to
+persist that terminal state. Both values are configurable, and the arq timeout
+must exceed the internal command timeout by at least five seconds.
 
 ```mermaid
 flowchart LR

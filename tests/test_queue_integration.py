@@ -120,6 +120,9 @@ async def test_mcp_command_runs_through_real_redis_worker_and_persists_once(
 async def test_hanging_handler_fails_job_without_persisting_command_result(
     monkeypatch,
 ):
+    handler_started = asyncio.Event()
+    started_job_id: UUID | None = None
+
     class HangingGeoResolveHandler:
         command = "geo.resolve"
 
@@ -127,10 +130,13 @@ async def test_hanging_handler_fails_job_without_persisting_command_result(
             self.session = session
 
         async def run(self, context, payload):
+            nonlocal started_job_id
+            started_job_id = context.job_id
+            handler_started.set()
             await asyncio.Event().wait()
 
     monkeypatch.setitem(HANDLERS, "geo.resolve", HangingGeoResolveHandler)
-    monkeypatch.setattr(settings, "command_job_timeout_seconds", 0.05)
+    monkeypatch.setattr(settings, "command_job_timeout_seconds", 1.0)
     worker_redis = await create_arq_pool(settings.redis_url)
     worker = Worker(
         [process_command_job],
@@ -144,10 +150,31 @@ async def test_hanging_handler_fails_job_without_persisting_command_result(
 
     try:
         async with Client(create_mcp_server()) as client:
-            result = await client.call_tool(
-                "resolve_location",
-                {"place": "Hanging Integration City", "limit": 1},
+            call_task = asyncio.create_task(
+                client.call_tool(
+                    "resolve_location",
+                    {"place": "Hanging Integration City", "limit": 1},
+                )
             )
+            await asyncio.wait_for(handler_started.wait(), timeout=5)
+            assert started_job_id is not None
+
+            async with AsyncSessionLocal() as session:
+                running_job = await JobService(session).get_by_id(started_job_id)
+                running_events = await JobRepository(session).get_events(
+                    started_job_id
+                )
+
+            assert running_job is not None
+            assert running_job.status == "running"
+            assert running_job.attempts == 1
+            assert running_job.started_at is not None
+            assert [event.event_type for event in running_events] == [
+                "queued",
+                "enqueued",
+                "started",
+            ]
+            result = await call_task
     finally:
         await worker.close()
         with suppress(asyncio.CancelledError):
@@ -167,9 +194,12 @@ async def test_hanging_handler_fails_job_without_persisting_command_result(
     assert job.status == "failed"
     assert job.error_type == "CommandTimeoutError"
     assert job.error_message == "Command execution exceeded its timeout."
+    assert job.attempts == 1
+    assert job.started_at is not None
     assert [event.event_type for event in events] == [
         "queued",
         "enqueued",
+        "started",
         "failed",
     ]
     assert events[-1].message == "Command execution timed out"

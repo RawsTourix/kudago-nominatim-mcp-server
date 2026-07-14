@@ -17,6 +17,7 @@ from app.application.handlers import (
     StreetRoutingHandler,
     TransitRoutingHandler,
 )
+from app.models.job import Job
 from app.repositories.job_repository import JobRepository
 from app.repositories.result_repository import ResultRepository
 
@@ -62,6 +63,58 @@ class CommandExecutor:
             source=source,
         )
 
+    async def start_existing_job(
+        self,
+        job_id: UUID,
+        *,
+        source: str = "worker",
+    ) -> bool:
+        job = await self.job_repo.get_by_id(job_id)
+        if job is None:
+            raise ValueError(f"Job not found: {job_id}")
+
+        if job.status == "succeeded" and job.result_payload is not None:
+            return False
+
+        await self.job_repo.mark_running(job)
+        await self.job_repo.add_event(
+            job_id=job.id,
+            event_type="started",
+            message=f"{job.command} execution started",
+            data={"command": job.command, "source": source},
+        )
+        return True
+
+    async def execute_started_job(
+        self,
+        job_id: UUID,
+        *,
+        source: str = "worker",
+    ) -> CommandOutput:
+        job = await self.job_repo.get_by_id(job_id)
+        if job is None:
+            raise ValueError(f"Job not found: {job_id}")
+
+        if job.status == "succeeded" and job.result_payload is not None:
+            return await self.load_completed_output(job_id)
+
+        if job.status != "running":
+            raise ValueError(
+                f"Job execution has not been started: {job_id}; "
+                f"status={job.status}"
+            )
+
+        context = ExecutionContext(
+            job_id=job.id,
+            command=job.command,
+            source=source,
+        )
+        return await self._execute_payload(
+            job=job,
+            context=context,
+            payload=job.input_payload,
+        )
+
     async def load_completed_output(self, job_id: UUID) -> CommandOutput:
         job = await self.job_repo.get_by_id(job_id)
 
@@ -105,15 +158,27 @@ class CommandExecutor:
             endpoint=endpoint,
         )
 
-        try:
-            await self.job_repo.mark_running(job)
-            await self.job_repo.add_event(
-                job_id=job.id,
-                event_type="started",
-                message=f"{command} execution started",
-                data={"command": command, "source": source},
-            )
+        await self.job_repo.mark_running(job)
+        await self.job_repo.add_event(
+            job_id=job.id,
+            event_type="started",
+            message=f"{command} execution started",
+            data={"command": command, "source": source},
+        )
+        return await self._execute_payload(
+            job=job,
+            context=context,
+            payload=payload,
+        )
 
+    async def _execute_payload(
+        self,
+        *,
+        job: Job,
+        context: ExecutionContext,
+        payload: dict[str, Any],
+    ) -> CommandOutput:
+        try:
             output = await self._dispatch(context, payload)
             for event in output.events:
                 await self.job_repo.add_event(
@@ -136,10 +201,10 @@ class CommandExecutor:
             await self.job_repo.add_event(
                 job_id=job.id,
                 event_type="completed",
-                message=f"{command} execution completed",
+                message=f"{context.command} execution completed",
                 data={
-                    "command": command,
-                    "source": source,
+                    "command": context.command,
+                    "source": context.source,
                     "result_status": output.status,
                 },
             )
@@ -153,10 +218,10 @@ class CommandExecutor:
             await self.job_repo.add_event(
                 job_id=job.id,
                 event_type="failed",
-                message=f"{command} execution failed",
+                message=f"{context.command} execution failed",
                 data={
-                    "command": command,
-                    "source": source,
+                    "command": context.command,
+                    "source": context.source,
                     "error_type": exc.__class__.__name__,
                     "error_message": str(exc),
                 },

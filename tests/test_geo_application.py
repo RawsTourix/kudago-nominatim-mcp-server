@@ -112,6 +112,64 @@ async def test_executor_persists_success_lifecycle():
 
 
 @pytest.mark.asyncio
+async def test_executor_splits_started_state_from_handler_execution():
+    job = SimpleNamespace(
+        id=uuid4(),
+        command="geo.resolve",
+        status="queued",
+        input_payload={"query": "Moscow"},
+        result_payload=None,
+    )
+    output = CommandOutput(
+        status="ok",
+        result_type="geo.resolve",
+        items=[],
+        meta={},
+        result_payload={"status": "ok", "candidates": []},
+    )
+    executor = CommandExecutor(SimpleNamespace())
+    executor.job_repo = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=job),
+        mark_running=AsyncMock(),
+        mark_succeeded=AsyncMock(),
+        mark_failed=AsyncMock(),
+        add_event=AsyncMock(),
+    )
+    executor.result_repo = SimpleNamespace(create=AsyncMock())
+    executor._dispatch = AsyncMock(return_value=output)
+
+    started = await executor.start_existing_job(job.id, source="worker")
+
+    assert started is True
+    executor.job_repo.mark_running.assert_awaited_once_with(job)
+    executor.job_repo.add_event.assert_awaited_once_with(
+        job_id=job.id,
+        event_type="started",
+        message="geo.resolve execution started",
+        data={"command": "geo.resolve", "source": "worker"},
+    )
+    executor._dispatch.assert_not_awaited()
+
+    job.status = "running"
+    executor.job_repo.add_event.reset_mock()
+    actual = await executor.execute_started_job(job.id, source="worker")
+
+    assert actual is output
+    executor.job_repo.mark_running.assert_awaited_once()
+    executor._dispatch.assert_awaited_once()
+    executor.job_repo.add_event.assert_awaited_once_with(
+        job_id=job.id,
+        event_type="completed",
+        message="geo.resolve execution completed",
+        data={
+            "command": "geo.resolve",
+            "source": "worker",
+            "result_status": "ok",
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_executor_persists_failure_lifecycle():
     job = SimpleNamespace(id=uuid4(), command="geo.resolve")
     executor = CommandExecutor(SimpleNamespace())

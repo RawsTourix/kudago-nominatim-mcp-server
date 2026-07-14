@@ -2,8 +2,8 @@ import asyncio
 from typing import Any
 from uuid import UUID
 
-from app.application.executor import CommandExecutor
 from app.application.contracts import CommandOutput
+from app.application.executor import CommandExecutor
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.repositories.job_repository import JobRepository
@@ -49,6 +49,34 @@ async def _mark_command_job_failed(
         await session.commit()
 
 
+async def _fail_if_dispatch_metadata_missing(job_id: UUID) -> bool:
+    async with AsyncSessionLocal() as session:
+        job_repo = JobRepository(session)
+        job = await job_repo.get_by_id_for_update(job_id)
+        if job is None:
+            raise DispatchMetadataMissingError(f"Job not found: {job_id}")
+
+        if job.queue_job_id is not None:
+            return False
+
+        error_message = (
+            "Dispatch metadata was not persisted before worker execution."
+        )
+        await job_repo.mark_failed(
+            job,
+            error_type=DispatchMetadataMissingError.__name__,
+            error_message=error_message,
+        )
+        await job_repo.add_event(
+            job_id=job.id,
+            event_type="failed",
+            message="Dispatch metadata was not available",
+            data={"error_type": DispatchMetadataMissingError.__name__},
+        )
+        await session.commit()
+        return True
+
+
 async def _wait_for_dispatch_metadata(
     job_id: UUID,
     *,
@@ -69,14 +97,10 @@ async def _wait_for_dispatch_metadata(
             break
         await asyncio.sleep(min(poll_interval_seconds, remaining))
 
-    error_message = "Dispatch metadata was not persisted before worker execution."
-    await _mark_command_job_failed(
-        job_id,
-        error_type=DispatchMetadataMissingError.__name__,
-        error_message=error_message,
-        event_message="Dispatch metadata was not available",
-    )
-    raise DispatchMetadataMissingError(error_message)
+    if await _fail_if_dispatch_metadata_missing(job_id):
+        raise DispatchMetadataMissingError(
+            "Dispatch metadata was not persisted before worker execution."
+        )
 
 
 async def _run_command_with_timeout(
@@ -86,7 +110,7 @@ async def _run_command_with_timeout(
     timeout_scope = asyncio.timeout(settings.command_job_timeout_seconds)
     try:
         async with timeout_scope:
-            output = await executor.run_existing_job(
+            output = await executor.execute_started_job(
                 job_id,
                 source="worker",
             )
@@ -160,6 +184,11 @@ async def process_test_job(ctx, job_id: str) -> dict:
 async def process_command_job(ctx, job_id: str) -> dict[str, Any]:
     parsed_job_id = UUID(job_id)
     await _wait_for_dispatch_metadata(parsed_job_id)
+
+    async with AsyncSessionLocal() as session:
+        executor = CommandExecutor(session)
+        await executor.start_existing_job(parsed_job_id, source="worker")
+        await session.commit()
 
     async with AsyncSessionLocal() as session:
         executor = CommandExecutor(session)

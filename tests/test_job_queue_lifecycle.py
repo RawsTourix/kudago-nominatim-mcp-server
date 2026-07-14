@@ -223,7 +223,9 @@ async def test_dispatch_marks_job_failed_when_enqueue_does_not_succeed(
 
 @pytest.mark.asyncio
 async def test_generic_worker_runs_existing_job_and_commits(monkeypatch):
-    session = _SessionContext()
+    start_session = _SessionContext()
+    execution_session = _SessionContext()
+    sessions = iter([start_session, execution_session])
     output = CommandOutput(
         status="ok",
         result_type="events.search",
@@ -232,9 +234,10 @@ async def test_generic_worker_runs_existing_job_and_commits(monkeypatch):
         result_payload={"status": "ok"},
     )
     command_executor = SimpleNamespace(
-        run_existing_job=AsyncMock(return_value=output)
+        start_existing_job=AsyncMock(return_value=True),
+        execute_started_job=AsyncMock(return_value=output),
     )
-    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: next(sessions))
     monkeypatch.setattr(tasks, "CommandExecutor", lambda _: command_executor)
     wait_for_metadata = AsyncMock()
     monkeypatch.setattr(tasks, "_wait_for_dispatch_metadata", wait_for_metadata)
@@ -247,28 +250,37 @@ async def test_generic_worker_runs_existing_job_and_commits(monkeypatch):
         "job_id": str(job_id),
         "result_status": "ok",
     }
-    command_executor.run_existing_job.assert_awaited_once_with(
+    command_executor.start_existing_job.assert_awaited_once_with(
+        job_id,
+        source="worker",
+    )
+    command_executor.execute_started_job.assert_awaited_once_with(
         job_id,
         source="worker",
     )
     wait_for_metadata.assert_awaited_once_with(job_id)
-    session.commit.assert_awaited_once()
+    start_session.commit.assert_awaited_once()
+    execution_session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_generic_worker_commits_failure_diagnostics_and_reraises(monkeypatch):
-    session = _SessionContext()
+    start_session = _SessionContext()
+    execution_session = _SessionContext()
+    sessions = iter([start_session, execution_session])
     command_executor = SimpleNamespace(
-        run_existing_job=AsyncMock(side_effect=RuntimeError("failed"))
+        start_existing_job=AsyncMock(return_value=True),
+        execute_started_job=AsyncMock(side_effect=RuntimeError("failed")),
     )
-    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: next(sessions))
     monkeypatch.setattr(tasks, "CommandExecutor", lambda _: command_executor)
     monkeypatch.setattr(tasks, "_wait_for_dispatch_metadata", AsyncMock())
 
     with pytest.raises(RuntimeError, match="failed"):
         await tasks.process_command_job({}, str(uuid4()))
 
-    session.commit.assert_awaited_once()
+    start_session.commit.assert_awaited_once()
+    execution_session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -308,7 +320,7 @@ async def test_worker_waits_for_dispatch_metadata_using_fresh_sessions(monkeypat
 @pytest.mark.asyncio
 async def test_missing_dispatch_metadata_marks_job_failed(monkeypatch):
     session = _SessionContext()
-    mark_failed = AsyncMock()
+    fail_if_missing = AsyncMock(return_value=True)
     monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: session)
     monkeypatch.setattr(
         tasks,
@@ -319,7 +331,11 @@ async def test_missing_dispatch_metadata_marks_job_failed(monkeypatch):
             )
         ),
     )
-    monkeypatch.setattr(tasks, "_mark_command_job_failed", mark_failed)
+    monkeypatch.setattr(
+        tasks,
+        "_fail_if_dispatch_metadata_missing",
+        fail_if_missing,
+    )
     job_id = uuid4()
 
     with pytest.raises(
@@ -328,21 +344,106 @@ async def test_missing_dispatch_metadata_marks_job_failed(monkeypatch):
     ):
         await tasks._wait_for_dispatch_metadata(job_id, timeout_seconds=0)
 
-    mark_failed.assert_awaited_once_with(
-        job_id,
-        error_type="DispatchMetadataMissingError",
-        error_message=(
-            "Dispatch metadata was not persisted before worker execution."
+    fail_if_missing.assert_awaited_once_with(job_id)
+
+
+@pytest.mark.asyncio
+async def test_final_dispatch_metadata_check_accepts_late_commit(monkeypatch):
+    session = _SessionContext()
+    fail_if_missing = AsyncMock(return_value=False)
+    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(
+        tasks,
+        "JobRepository",
+        lambda _: SimpleNamespace(
+            get_by_id=AsyncMock(
+                return_value=SimpleNamespace(queue_job_id=None)
+            )
         ),
-        event_message="Dispatch metadata was not available",
     )
+    monkeypatch.setattr(
+        tasks,
+        "_fail_if_dispatch_metadata_missing",
+        fail_if_missing,
+    )
+    job_id = uuid4()
+
+    await tasks._wait_for_dispatch_metadata(job_id, timeout_seconds=0)
+
+    fail_if_missing.assert_awaited_once_with(job_id)
+
+
+@pytest.mark.asyncio
+async def test_final_dispatch_metadata_failure_uses_locked_fresh_read(monkeypatch):
+    session = _SessionContext()
+    job_id = uuid4()
+    job = SimpleNamespace(
+        id=job_id,
+        queue_job_id=None,
+        status="queued",
+        error_type=None,
+        error_message=None,
+    )
+
+    async def mark_failed(target, *, error_type, error_message):
+        target.status = "failed"
+        target.error_type = error_type
+        target.error_message = error_message
+
+    job_repo = SimpleNamespace(
+        get_by_id_for_update=AsyncMock(return_value=job),
+        mark_failed=AsyncMock(side_effect=mark_failed),
+        add_event=AsyncMock(),
+    )
+    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(tasks, "JobRepository", lambda _: job_repo)
+
+    failed = await tasks._fail_if_dispatch_metadata_missing(job_id)
+
+    assert failed is True
+    job_repo.get_by_id_for_update.assert_awaited_once_with(job_id)
+    assert job.status == "failed"
+    assert job.error_type == "DispatchMetadataMissingError"
+    job_repo.add_event.assert_awaited_once_with(
+        job_id=job_id,
+        event_type="failed",
+        message="Dispatch metadata was not available",
+        data={"error_type": "DispatchMetadataMissingError"},
+    )
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_final_dispatch_metadata_check_preserves_late_commit(monkeypatch):
+    session = _SessionContext()
+    job_id = uuid4()
+    job = SimpleNamespace(
+        id=job_id,
+        queue_job_id="events.search:late-commit",
+    )
+    job_repo = SimpleNamespace(
+        get_by_id_for_update=AsyncMock(return_value=job),
+        mark_failed=AsyncMock(),
+        add_event=AsyncMock(),
+    )
+    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(tasks, "JobRepository", lambda _: job_repo)
+
+    failed = await tasks._fail_if_dispatch_metadata_missing(job_id)
+
+    assert failed is False
+    job_repo.get_by_id_for_update.assert_awaited_once_with(job_id)
+    job_repo.mark_failed.assert_not_awaited()
+    job_repo.add_event.assert_not_awaited()
+    session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_worker_command_timeout_rolls_back_and_records_failure(monkeypatch):
+    start_session = _SessionContext()
     execution_session = _SessionContext()
     failure_session = _SessionContext()
-    sessions = iter([execution_session, failure_session])
+    sessions = iter([start_session, execution_session, failure_session])
     job_id = uuid4()
     job = SimpleNamespace(
         id=job_id,
@@ -364,7 +465,10 @@ async def test_worker_command_timeout_rolls_back_and_records_failure(monkeypatch
         mark_failed=AsyncMock(side_effect=mark_failed),
         add_event=AsyncMock(),
     )
-    command_executor = SimpleNamespace(run_existing_job=hang)
+    command_executor = SimpleNamespace(
+        start_existing_job=AsyncMock(return_value=True),
+        execute_started_job=hang,
+    )
     monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: next(sessions))
     monkeypatch.setattr(tasks, "CommandExecutor", lambda _: command_executor)
     monkeypatch.setattr(tasks, "JobRepository", lambda _: job_repo)
@@ -377,6 +481,7 @@ async def test_worker_command_timeout_rolls_back_and_records_failure(monkeypatch
     ):
         await tasks.process_command_job({}, str(job_id))
 
+    start_session.commit.assert_awaited_once()
     execution_session.rollback.assert_awaited_once()
     execution_session.commit.assert_not_awaited()
     failure_session.commit.assert_awaited_once()
@@ -393,19 +498,25 @@ async def test_worker_command_timeout_rolls_back_and_records_failure(monkeypatch
 
 @pytest.mark.asyncio
 async def test_worker_preserves_non_budget_timeout_diagnostics(monkeypatch):
-    session = _SessionContext()
+    start_session = _SessionContext()
+    execution_session = _SessionContext()
+    sessions = iter([start_session, execution_session])
     command_executor = SimpleNamespace(
-        run_existing_job=AsyncMock(side_effect=TimeoutError("upstream timeout"))
+        start_existing_job=AsyncMock(return_value=True),
+        execute_started_job=AsyncMock(
+            side_effect=TimeoutError("upstream timeout")
+        ),
     )
-    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: next(sessions))
     monkeypatch.setattr(tasks, "CommandExecutor", lambda _: command_executor)
     monkeypatch.setattr(tasks, "_wait_for_dispatch_metadata", AsyncMock())
 
     with pytest.raises(TimeoutError, match="upstream timeout"):
         await tasks.process_command_job({}, str(uuid4()))
 
-    session.commit.assert_awaited_once()
-    session.rollback.assert_not_awaited()
+    start_session.commit.assert_awaited_once()
+    execution_session.commit.assert_awaited_once()
+    execution_session.rollback.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,9 @@ The timeout chain is deliberately ordered: command execution uses
 `COMMAND_JOB_TIMEOUT_SECONDS` (120 seconds by default), arq enforces the hard
 `ARQ_JOB_TIMEOUT_SECONDS` limit (135 seconds), and MCP waits up to the
 server-lifespan value `MCP_JOB_WAIT_TIMEOUT_SECONDS` (180 seconds). The MCP
-value configured on a particular server instance is passed to every tool.
+value configured on a particular server instance is passed to every tool. The
+arq hard timeout must leave at least five seconds after the command timeout for
+rollback and terminal-state persistence.
 An MCP wait timeout returns `processing_timeout` with `retryable=false`, leaves
 the job queued or running, and does not abort it. Redis, worker and timeout
 failures never fall back to inline execution.
