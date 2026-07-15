@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -11,6 +12,9 @@ from uuid import UUID
 from arq.worker import Worker
 from dotenv import load_dotenv
 from fastmcp import Client
+import httpx
+from sqlalchemy import func, select
+import uvicorn
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,8 +26,10 @@ from app.application.executor import CommandExecutor
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal, engine
 from app.core.redis import create_arq_pool
-from app.mcp.server import create_mcp_server
+from app.main import app
 from app.models.api_request import ApiRequest
+from app.models.job import Job
+from app.models.upstream_call import UpstreamCall
 from app.repositories.job_repository import JobRepository
 from app.repositories.upstream_call_repository import UpstreamCallRepository
 from app.schemas.routing import (
@@ -241,7 +247,7 @@ def _street_scenarios() -> list[SmokeScenario]:
     ]
 
 
-async def _run_mcp_e2e(route_time: datetime) -> None:
+async def _run_mcp_http_e2e(route_time: datetime) -> None:
     worker_redis = await create_arq_pool(settings.redis_url)
     worker = Worker(
         [process_command_job],
@@ -252,6 +258,19 @@ async def _run_mcp_e2e(route_time: datetime) -> None:
         keep_result=3600,
     )
     worker_task = asyncio.create_task(worker.async_run())
+    server_socket = _create_server_socket()
+    host, port = server_socket.getsockname()[:2]
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            lifespan="on",
+            log_level="warning",
+        )
+    )
+    server_task = asyncio.create_task(server.serve(sockets=[server_socket]))
+    base_url = f"http://{host}:{port}"
 
     transit_arguments = {
         "origin": {
@@ -296,7 +315,8 @@ async def _run_mcp_e2e(route_time: datetime) -> None:
     }
 
     try:
-        async with Client(create_mcp_server(), timeout=180.0) as client:
+        await _wait_for_http_health(base_url, server, server_task)
+        async with Client(f"{base_url}/mcp", timeout=180.0) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
             transit_schema = tools["plan_public_transport"].inputSchema
             properties = transit_schema["properties"]
@@ -312,6 +332,36 @@ async def _run_mcp_e2e(route_time: datetime) -> None:
                     raise AssertionError(
                         f"live MCP schema does not explain required {time_field}"
                     )
+            if len(transit_schema.get("oneOf", [])) != 2:
+                raise AssertionError(
+                    "live MCP schema does not enforce exactly one routing time"
+                )
+
+            persistence_before = await _routing_persistence_counts()
+            missing_time = await client.call_tool(
+                "plan_public_transport",
+                {
+                    key: value
+                    for key, value in transit_arguments.items()
+                    if key != "departure_time"
+                },
+                timeout=180.0,
+            )
+            both_times = await client.call_tool(
+                "plan_public_transport",
+                {
+                    **transit_arguments,
+                    "arrival_time": (route_time + timedelta(hours=1)).isoformat(),
+                },
+                timeout=180.0,
+            )
+            _verify_mcp_validation_error(missing_time.data)
+            _verify_mcp_validation_error(both_times.data)
+            persistence_after = await _routing_persistence_counts()
+            if persistence_after != persistence_before:
+                raise AssertionError(
+                    "invalid MCP routing calls created a job or upstream call"
+                )
 
             transit = await client.call_tool(
                 "plan_public_transport",
@@ -329,9 +379,19 @@ async def _run_mcp_e2e(route_time: datetime) -> None:
                 timeout=180.0,
             )
     finally:
-        await worker.close()
-        with suppress(asyncio.CancelledError):
-            await worker_task
+        server.should_exit = True
+        try:
+            await _await_bounded_shutdown(server_task, "Uvicorn server")
+        finally:
+            try:
+                await worker.close()
+                await _await_bounded_shutdown(
+                    worker_task,
+                    "arq worker",
+                    cancelled_is_expected=True,
+                )
+            finally:
+                server_socket.close()
 
     transit_result = transit.data
     street_result = street.data
@@ -398,6 +458,74 @@ async def _run_mcp_e2e(route_time: datetime) -> None:
         f"retry_hints={len(no_route_result['data']['retry_hints'])}, "
         f"job_id={no_route_result['job_id']}"
     )
+
+
+def _create_server_socket() -> socket.socket:
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind(("127.0.0.1", 0))
+    server_socket.listen(2048)
+    server_socket.setblocking(False)
+    return server_socket
+
+
+async def _wait_for_http_health(
+    base_url: str,
+    server: uvicorn.Server,
+    server_task: asyncio.Task[bool | None],
+) -> None:
+    deadline = asyncio.get_running_loop().time() + 15.0
+    while not server.started:
+        if server_task.done():
+            await server_task
+            raise RuntimeError("Uvicorn stopped before becoming ready")
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError("Uvicorn did not become ready within 15 seconds")
+        await asyncio.sleep(0.05)
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(f"{base_url}/api/v1/health")
+    response.raise_for_status()
+    if response.json() != {"status": "ok"}:
+        raise AssertionError("HTTP health endpoint returned bad data")
+
+
+async def _await_bounded_shutdown(
+    task: asyncio.Task[Any],
+    component: str,
+    *,
+    cancelled_is_expected: bool = False,
+) -> None:
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=15.0)
+    except asyncio.CancelledError:
+        if not cancelled_is_expected:
+            raise
+    except TimeoutError:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        raise TimeoutError(f"{component} did not stop within 15 seconds")
+
+
+async def _routing_persistence_counts() -> tuple[int, int]:
+    async with AsyncSessionLocal() as session:
+        job_count = await session.scalar(select(func.count()).select_from(Job))
+        upstream_count = await session.scalar(
+            select(func.count()).select_from(UpstreamCall)
+        )
+    return int(job_count or 0), int(upstream_count or 0)
+
+
+def _verify_mcp_validation_error(result: dict[str, Any]) -> None:
+    if result.get("status") != "error":
+        raise AssertionError(f"invalid MCP call did not return an error: {result!r}")
+    if result.get("error_type") != "validation_error":
+        raise AssertionError(f"invalid MCP call returned a wrong envelope: {result!r}")
+    if result.get("job_id") is not None:
+        raise AssertionError("invalid MCP call unexpectedly returned a job_id")
+    if not isinstance(result.get("details"), list) or not result["details"]:
+        raise AssertionError("invalid MCP call returned no validation details")
 
 
 def _verify_mcp_result(
@@ -480,7 +608,7 @@ async def main() -> None:
     try:
         for scenario in [*_street_scenarios(), *_transit_scenarios(route_time)]:
             results[scenario.name] = await _run_scenario(scenario)
-        await _run_mcp_e2e(route_time)
+        await _run_mcp_http_e2e(route_time)
     finally:
         await engine.dispose()
 

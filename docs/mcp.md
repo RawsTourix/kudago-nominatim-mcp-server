@@ -149,6 +149,15 @@ restricts the search. Routing `no_route` responses include structured
 diagnostics and retry hints with both a stable code and agent-readable message.
 `plan_street_route` exposes `travel_mode`, not an ORS profile.
 
+`plan_public_transport` publishes that time invariant as a structural JSON
+Schema `oneOf`. Clients therefore see the requirement for exactly one non-null
+`departure_time` or `arrival_time` in the machine-readable schema as well as in
+the field descriptions; the opposite field may be omitted or sent as `null`.
+
+The routing live smoke uses the real Streamable HTTP endpoint at `/mcp` with
+Uvicorn, Redis, an arq worker, PostgreSQL and the real providers. The in-memory
+MCP transport remains covered separately by unit and integration tests.
+
 Provider-specific values such as `TRANSIT`, `foot-walking` and
 `cycling-regular` are not public MCP values.
 

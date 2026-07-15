@@ -30,6 +30,11 @@ Internally that policy is sent as MOTIS `TRANSIT`, which is not part of the
 agent enum. Transitous access and egress are fixed to walking for at most 900
 seconds each, and independent direct routes are disabled.
 
+The published input schema expresses the time rule as a structural JSON Schema
+`oneOf`, so clients see the requirement for exactly one non-null time constraint
+in machine-readable form as well as in the descriptions. The opposite time
+field may be omitted or sent as `null`; the public contract remains flat.
+
 `plan_street_route` uses the public `travel_mode` values `walking`, `cycling`
 and `driving`. ORS profiles such as `foot-walking` remain internal. Street MCP
 calls always request instructions and disable geometry.
@@ -77,11 +82,13 @@ The FastAPI and worker routing commands remain available regardless of MCP
 catalog visibility. Missing MCP provider configuration is logged as a warning.
 
 `scripts/test_routing_live.py` first exercises the application/provider path,
-then starts a real arq worker and calls one public-transport and one walking
-tool through FastMCP, followed by a known public-transport `no_route` scenario.
-The end-to-end phase verifies the published schema, renamed arguments, labels,
-Redis queue metadata, persisted upstream call, final serialized agent response
-and structured no-route guidance.
+then starts Uvicorn and a real arq worker and calls one public-transport and one
+walking tool through the Streamable HTTP endpoint at `/mcp`, followed by a known
+public-transport `no_route` scenario. This path uses Redis, PostgreSQL and the
+real providers; in-memory MCP transport remains covered separately by unit and
+integration tests. The end-to-end phase verifies the published schema, renamed
+arguments, labels, Redis queue metadata, persisted upstream call, final
+serialized agent response and structured no-route guidance.
 
 ## Provider contracts
 

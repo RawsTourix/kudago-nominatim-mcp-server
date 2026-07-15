@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 from fastmcp import Client
+from jsonschema import Draft202012Validator, FormatChecker
 
 from app.mcp.reference_data import REFERENCE_SNAPSHOT
 from app.mcp.server import create_mcp_server
@@ -161,6 +162,76 @@ async def test_actual_fastmcp_schemas_expose_defaults_limits_and_public_fields_o
     assert {"mode", "profile", "language", "include_geometry"}.isdisjoint(street)
 
 
+@pytest.mark.asyncio
+async def test_public_transport_schema_requires_exactly_one_non_null_time(
+    fake_mcp_redis,
+):
+    server = create_mcp_server(
+        settings_obj=SimpleNamespace(
+            redis_url="redis://test:6379/0",
+            mcp_job_wait_timeout_seconds=180.0,
+            transitous_user_agent="tests/1.0 tests@example.com",
+            openrouteservice_api_key="test-key",
+        )
+    )
+    async with Client(server) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+
+    schema = tools["plan_public_transport"].inputSchema
+    assert len(schema["oneOf"]) == 2
+    assert {tuple(branch["required"]) for branch in schema["oneOf"]} == {
+        ("departure_time",),
+        ("arrival_time",),
+    }
+    assert {"departure_time", "arrival_time"} <= schema["properties"].keys()
+    assert "time_constraint" not in schema["properties"]
+    assert "ctx" not in schema["properties"]
+
+    validator = Draft202012Validator(
+        schema,
+        format_checker=FormatChecker(),
+    )
+    base_arguments = {
+        "origin": {"latitude": 52.5219, "longitude": 13.4132},
+        "destination": {"latitude": 52.5251, "longitude": 13.3694},
+    }
+    valid_arguments = [
+        {**base_arguments, "departure_time": "2026-07-16T10:00:00+00:00"},
+        {
+            **base_arguments,
+            "departure_time": "2026-07-16T10:00:00+00:00",
+            "arrival_time": None,
+        },
+        {**base_arguments, "arrival_time": "2026-07-16T11:00:00+00:00"},
+        {
+            **base_arguments,
+            "arrival_time": "2026-07-16T11:00:00+00:00",
+            "departure_time": None,
+        },
+    ]
+    invalid_arguments = [
+        base_arguments,
+        {
+            **base_arguments,
+            "departure_time": None,
+            "arrival_time": None,
+        },
+        {**base_arguments, "departure_time": None},
+        {**base_arguments, "arrival_time": None},
+        {
+            **base_arguments,
+            "departure_time": "2026-07-16T10:00:00+00:00",
+            "arrival_time": "2026-07-16T11:00:00+00:00",
+        },
+    ]
+
+    for arguments in valid_arguments:
+        errors = list(validator.iter_errors(arguments))
+        assert errors == [], [error.message for error in errors]
+    for arguments in invalid_arguments:
+        assert not validator.is_valid(arguments), arguments
+
+
 def _missing_property_descriptions(
     schema: dict[str, Any],
     path: str = "",
@@ -174,7 +245,8 @@ def _missing_property_descriptions(
                 missing.append(current)
             if isinstance(subschema, dict):
                 missing.extend(_missing_property_descriptions(subschema, current))
-    for key in ("items", "anyOf", "oneOf", "allOf"):
+    # oneOf branches can constrain properties already documented at the root.
+    for key in ("items", "anyOf", "allOf"):
         nested = schema.get(key)
         if isinstance(nested, dict):
             missing.extend(_missing_property_descriptions(nested, path))

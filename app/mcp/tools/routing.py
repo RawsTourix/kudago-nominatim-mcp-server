@@ -5,11 +5,13 @@ from functools import partial
 from typing import Any
 
 from fastmcp import Context, FastMCP
+from fastmcp.tools import Tool
 from pydantic import ValidationError
 
 from app.core.config import Settings, settings
 from app.mcp.executor import run_mcp_command
 from app.mcp.mappers import STREET_MODE_MAP, transit_modes, transit_time
+from app.mcp.schema_overrides import with_exactly_one_routing_time
 from app.mcp.schemas.routing import (
     ArrivalTimeInput,
     DepartureTimeInput,
@@ -60,11 +62,6 @@ def register_routing_tools(
 
 
 def _register_public_transport_tool(mcp: FastMCP) -> None:
-    @mcp.tool(
-        name="plan_public_transport",
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
-        version=MCP_FACADE_VERSION,
-    )
     async def plan_public_transport(
         ctx: Context,
         origin: OriginInput,
@@ -124,6 +121,15 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
                 agent_request=agent_request,
             ),
         )
+
+    tool = Tool.from_function(
+        plan_public_transport,
+        name="plan_public_transport",
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        version=MCP_FACADE_VERSION,
+    )
+    tool.parameters = with_exactly_one_routing_time(tool.parameters)
+    mcp.add_tool(tool)
 
 
 def _register_street_route_tool(mcp: FastMCP) -> None:
