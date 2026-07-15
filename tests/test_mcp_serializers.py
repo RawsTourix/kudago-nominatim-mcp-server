@@ -338,6 +338,29 @@ def test_street_route_serializer_preserves_labels_and_removes_geometry():
     assert no_route["result_status"] == "no_route"
     assert no_route["route_verified"] is False
     assert no_route["routes"] == []
+    assert no_route["diagnostic"] == {
+        "code": "provider_returned_no_route",
+        "message": (
+            "OpenRouteService could not build a route between these exact "
+            "coordinates for the selected travel mode."
+        ),
+    }
+    assert no_route["retry_hints"] == [
+        {
+            "code": "verify_route_points",
+            "message": (
+                "Check that both coordinates are located on or near a routeable "
+                "street or path."
+            ),
+        },
+        {
+            "code": "try_nearby_point",
+            "message": (
+                "Try a nearby entrance or road-access point if the destination "
+                "is inside a large property."
+            ),
+        },
+    ]
 
 
 def test_public_transport_serializer_uses_original_agent_request():
@@ -440,5 +463,21 @@ def test_public_transport_no_route_has_cautious_conditional_diagnostics():
     }
     assert data["request"]["transport_mode_policy"] == "all_provider_supported"
     assert data["request"]["transport_modes"] is None
-    assert "remove_mode_restrictions" not in data["retry_hints"]
-    assert restricted_data["retry_hints"][-1] == "remove_mode_restrictions"
+    assert [hint["code"] for hint in data["retry_hints"]] == [
+        "verify_route_points",
+        "try_nearby_time",
+        "check_provider_coverage",
+        "check_walking_access_limit",
+    ]
+    assert data["retry_hints"][-1]["message"] == (
+        "Walking access and egress are limited to 900 seconds each. Try "
+        "coordinates of a nearer station, stop or entrance and combine the "
+        "result with plan_street_route."
+    )
+    assert restricted_data["retry_hints"][-1] == {
+        "code": "remove_mode_restrictions",
+        "message": (
+            "Omit transport_modes to allow every transit mode supported by the "
+            "provider."
+        ),
+    }

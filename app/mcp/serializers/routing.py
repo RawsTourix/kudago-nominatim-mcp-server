@@ -4,6 +4,12 @@ from copy import deepcopy
 from typing import Any
 
 from app.application.contracts import CommandOutput
+from app.integrations.transitous.routing_policy import (
+    TRANSIT_AGENT_WALKING_MODE,
+    TRANSIT_DIRECT_MODES,
+    TRANSIT_MAX_ACCESS_SECONDS,
+    TRANSIT_MAX_EGRESS_SECONDS,
+)
 from app.mcp.schemas.routing import (
     PlanPublicTransportInput,
     PlanStreetRouteInput,
@@ -25,10 +31,59 @@ REMOVED_ROUTE_FIELDS = {
     "previousPageCursor",
 }
 PUBLIC_TRANSPORT_RETRY_HINTS = [
-    "verify_route_points",
-    "try_nearby_time",
-    "check_provider_coverage",
-    "check_walking_access_limit",
+    {
+        "code": "verify_route_points",
+        "message": (
+            "Check that both coordinates match the intended origin and "
+            "destination."
+        ),
+    },
+    {
+        "code": "try_nearby_time",
+        "message": (
+            "Try a nearby departure or arrival time because the provider "
+            "returned no itinerary for the exact requested time."
+        ),
+    },
+    {
+        "code": "check_provider_coverage",
+        "message": (
+            "Check provider coverage separately; this response does not "
+            "include a structured coverage status."
+        ),
+    },
+    {
+        "code": "check_walking_access_limit",
+        "message": (
+            "Walking access and egress are limited to "
+            f"{TRANSIT_MAX_ACCESS_SECONDS} seconds each. Try "
+            "coordinates of a nearer station, stop or entrance and combine "
+            "the result with plan_street_route."
+        ),
+    },
+]
+REMOVE_MODE_RESTRICTIONS_HINT = {
+    "code": "remove_mode_restrictions",
+    "message": (
+        "Omit transport_modes to allow every transit mode supported by the "
+        "provider."
+    ),
+}
+STREET_RETRY_HINTS = [
+    {
+        "code": "verify_route_points",
+        "message": (
+            "Check that both coordinates are located on or near a routeable "
+            "street or path."
+        ),
+    },
+    {
+        "code": "try_nearby_point",
+        "message": (
+            "Try a nearby entrance or road-access point if the destination is "
+            "inside a large property."
+        ),
+    },
 ]
 
 
@@ -53,9 +108,9 @@ def serialize_public_transport(
         "routes": routes,
     }
     if result_status == "no_route":
-        retry_hints = list(PUBLIC_TRANSPORT_RETRY_HINTS)
+        retry_hints = deepcopy(PUBLIC_TRANSPORT_RETRY_HINTS)
         if agent_request.transport_modes is not None:
-            retry_hints.append("remove_mode_restrictions")
+            retry_hints.append(deepcopy(REMOVE_MODE_RESTRICTIONS_HINT))
         result["diagnostic"] = {
             "code": "provider_returned_no_itineraries",
             "coverage_status": "unknown",
@@ -81,7 +136,7 @@ def serialize_street_route(
     if result_status != "ok":
         routes = []
 
-    result = {
+    result: dict[str, Any] = {
         "result_kind": "street_route",
         "result_status": result_status,
         "route_verified": result_status == "ok" and bool(routes),
@@ -96,6 +151,15 @@ def serialize_street_route(
         "warnings": _list_value(payload.get("warnings")),
         "attribution": _list_value(payload.get("attribution")),
     }
+    if result_status == "no_route":
+        result["diagnostic"] = {
+            "code": "provider_returned_no_route",
+            "message": (
+                "OpenRouteService could not build a route between these exact "
+                "coordinates for the selected travel mode."
+            ),
+        }
+        result["retry_hints"] = deepcopy(STREET_RETRY_HINTS)
     return _limit_routes(result)
 
 
@@ -128,11 +192,11 @@ def _public_transport_request(
         "transport_modes": modes,
         "max_transfers": request.max_transfers,
         "max_routes": request.max_routes,
-        "access_mode": "walking",
-        "egress_mode": "walking",
-        "max_access_seconds": 900,
-        "max_egress_seconds": 900,
-        "direct_routes_enabled": False,
+        "access_mode": TRANSIT_AGENT_WALKING_MODE,
+        "egress_mode": TRANSIT_AGENT_WALKING_MODE,
+        "max_access_seconds": TRANSIT_MAX_ACCESS_SECONDS,
+        "max_egress_seconds": TRANSIT_MAX_EGRESS_SECONDS,
+        "direct_routes_enabled": bool(TRANSIT_DIRECT_MODES),
     }
 
 

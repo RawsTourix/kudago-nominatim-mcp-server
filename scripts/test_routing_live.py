@@ -1,12 +1,16 @@
 import asyncio
 import os
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
+from arq.worker import Worker
 from dotenv import load_dotenv
+from fastmcp import Client
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +19,11 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 from app.application.executor import CommandExecutor
+from app.core.config import settings
 from app.core.db import AsyncSessionLocal, engine
+from app.core.redis import create_arq_pool
+from app.mcp.server import create_mcp_server
+from app.models.api_request import ApiRequest
 from app.repositories.job_repository import JobRepository
 from app.repositories.upstream_call_repository import UpstreamCallRepository
 from app.schemas.routing import (
@@ -24,6 +32,8 @@ from app.schemas.routing import (
     TransitMode,
     TransitRouteRequest,
 )
+from app.services.job_service import JobService
+from app.workers.tasks import process_command_job
 
 
 BERLIN_ALEXANDERPLATZ = (52.5219, 13.4132)
@@ -231,6 +241,232 @@ def _street_scenarios() -> list[SmokeScenario]:
     ]
 
 
+async def _run_mcp_e2e(route_time: datetime) -> None:
+    worker_redis = await create_arq_pool(settings.redis_url)
+    worker = Worker(
+        [process_command_job],
+        redis_pool=worker_redis,
+        handle_signals=False,
+        poll_delay=0.05,
+        job_timeout=settings.arq_job_timeout_seconds,
+        keep_result=3600,
+    )
+    worker_task = asyncio.create_task(worker.async_run())
+
+    transit_arguments = {
+        "origin": {
+            "label": "Berlin Alexanderplatz",
+            "latitude": BERLIN_ALEXANDERPLATZ[0],
+            "longitude": BERLIN_ALEXANDERPLATZ[1],
+        },
+        "destination": {
+            "label": "Berlin Hauptbahnhof",
+            "latitude": BERLIN_HAUPTBAHNHOF[0],
+            "longitude": BERLIN_HAUPTBAHNHOF[1],
+        },
+        "departure_time": route_time.isoformat(),
+        "max_routes": 3,
+    }
+    street_arguments = {
+        "origin": {
+            "label": "Nakhabino station",
+            "latitude": NAKHABINO_STATION[0],
+            "longitude": NAKHABINO_STATION[1],
+        },
+        "destination": {
+            "label": "Nearby street point",
+            "latitude": SHORT_STREET_DESTINATION[0],
+            "longitude": SHORT_STREET_DESTINATION[1],
+        },
+        "travel_mode": "walking",
+    }
+    no_route_arguments = {
+        "origin": {
+            "label": "Nakhabino station",
+            "latitude": NAKHABINO_STATION[0],
+            "longitude": NAKHABINO_STATION[1],
+        },
+        "destination": {
+            "label": "Arkhangelskoye museum",
+            "latitude": ARKHANGELSKOYE_MUSEUM[0],
+            "longitude": ARKHANGELSKOYE_MUSEUM[1],
+        },
+        "departure_time": route_time.isoformat(),
+        "max_routes": 3,
+    }
+
+    try:
+        async with Client(create_mcp_server(), timeout=180.0) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            transit_schema = tools["plan_public_transport"].inputSchema
+            properties = transit_schema["properties"]
+            if not {"transport_modes", "max_routes"} <= properties.keys():
+                raise AssertionError("live MCP schema is missing renamed transit fields")
+            if {"modes", "limit"} & properties.keys():
+                raise AssertionError("live MCP schema still exposes old transit fields")
+            required_time_text = (
+                "Exactly one of departure_time and arrival_time is required."
+            )
+            for time_field in ("departure_time", "arrival_time"):
+                if required_time_text not in properties[time_field]["description"]:
+                    raise AssertionError(
+                        f"live MCP schema does not explain required {time_field}"
+                    )
+
+            transit = await client.call_tool(
+                "plan_public_transport",
+                transit_arguments,
+                timeout=180.0,
+            )
+            street = await client.call_tool(
+                "plan_street_route",
+                street_arguments,
+                timeout=180.0,
+            )
+            no_route = await client.call_tool(
+                "plan_public_transport",
+                no_route_arguments,
+                timeout=180.0,
+            )
+    finally:
+        await worker.close()
+        with suppress(asyncio.CancelledError):
+            await worker_task
+
+    transit_result = transit.data
+    street_result = street.data
+    no_route_result = no_route.data
+    _verify_mcp_result(
+        transit_result,
+        result_kind="public_transport_routes",
+        origin_label="Berlin Alexanderplatz",
+        destination_label="Berlin Hauptbahnhof",
+    )
+    _verify_mcp_result(
+        street_result,
+        result_kind="street_route",
+        origin_label="Nakhabino station",
+        destination_label="Nearby street point",
+    )
+    if transit_result["data"]["request"]["transport_modes"] is not None:
+        raise AssertionError("omitted transport_modes was not preserved as null")
+    if (
+        transit_result["data"]["request"]["transport_mode_policy"]
+        != "all_provider_supported"
+    ):
+        raise AssertionError("unexpected live MCP transport mode policy")
+    if street_result["data"]["request"]["travel_mode"] != "walking":
+        raise AssertionError("unexpected live MCP street travel mode")
+    _verify_mcp_no_route(no_route_result)
+
+    await _verify_mcp_job(
+        transit_result,
+        expected_request_text=(
+            "Berlin Alexanderplatz (52.5219,13.4132) -> "
+            "Berlin Hauptbahnhof (52.5251,13.3694)"
+        ),
+    )
+    await _verify_mcp_job(
+        street_result,
+        expected_request_text=(
+            "Nakhabino station (55.8415879,37.184911) -> "
+            "Nearby street point (55.845,37.195)"
+        ),
+    )
+    await _verify_mcp_job(
+        no_route_result,
+        expected_request_text=(
+            "Nakhabino station (55.8415879,37.184911) -> "
+            "Arkhangelskoye museum (55.7885844,37.2859336)"
+        ),
+    )
+    print(
+        "mcp-e2e-public-transport: "
+        f"status={transit_result['data']['result_status']}, "
+        f"routes={len(transit_result['data']['routes'])}, "
+        f"job_id={transit_result['job_id']}"
+    )
+    print(
+        "mcp-e2e-street-walking: "
+        f"status={street_result['data']['result_status']}, "
+        f"routes={len(street_result['data']['routes'])}, "
+        f"job_id={street_result['job_id']}"
+    )
+    print(
+        "mcp-e2e-public-transport-no-route: "
+        f"diagnostic={no_route_result['data']['diagnostic']['code']}, "
+        f"retry_hints={len(no_route_result['data']['retry_hints'])}, "
+        f"job_id={no_route_result['job_id']}"
+    )
+
+
+def _verify_mcp_result(
+    result: dict[str, Any],
+    *,
+    result_kind: str,
+    origin_label: str,
+    destination_label: str,
+) -> None:
+    if result.get("status") != "ok":
+        raise AssertionError(f"live MCP call failed: {result!r}")
+    data = result.get("data")
+    if not isinstance(data, dict) or data.get("result_kind") != result_kind:
+        raise AssertionError(f"live MCP returned unexpected data: {data!r}")
+    if not data.get("route_verified") or not data.get("routes"):
+        raise AssertionError(f"live MCP returned no verified route: {data!r}")
+    request = data.get("request")
+    if not isinstance(request, dict):
+        raise AssertionError("live MCP result has no request summary")
+    if request["origin"].get("label") != origin_label:
+        raise AssertionError("live MCP result lost the origin label")
+    if request["destination"].get("label") != destination_label:
+        raise AssertionError("live MCP result lost the destination label")
+
+
+def _verify_mcp_no_route(result: dict[str, Any]) -> None:
+    if result.get("status") != "ok" or result.get("result_status") != "no_route":
+        raise AssertionError(f"live MCP no-route call failed: {result!r}")
+    data = result.get("data")
+    if not isinstance(data, dict):
+        raise AssertionError("live MCP no-route result has no data")
+    if data.get("route_verified") is not False or data.get("routes") != []:
+        raise AssertionError("live MCP no-route result claims a verified route")
+    diagnostic = data.get("diagnostic")
+    if not isinstance(diagnostic, dict) or diagnostic.get("code") != (
+        "provider_returned_no_itineraries"
+    ):
+        raise AssertionError("live MCP no-route diagnostic was not serialized")
+    hints = data.get("retry_hints")
+    if not isinstance(hints, list) or not all(
+        isinstance(hint, dict) and {"code", "message"} <= hint.keys()
+        for hint in hints
+    ):
+        raise AssertionError("live MCP no-route retry hints are not structured")
+    hint_codes = {hint["code"] for hint in hints}
+    if "check_walking_access_limit" not in hint_codes:
+        raise AssertionError("live MCP no-route response lost walking-limit guidance")
+
+
+async def _verify_mcp_job(
+    result: dict[str, Any],
+    *,
+    expected_request_text: str,
+) -> None:
+    job_id = UUID(result["job_id"])
+    async with AsyncSessionLocal() as session:
+        job = await JobService(session).get_by_id(job_id)
+        if job is None or job.status != "succeeded":
+            raise AssertionError(f"live MCP job did not succeed: {job_id}")
+        if job.queue_job_id != f"{job.command}:{job_id}":
+            raise AssertionError("live MCP job does not contain arq queue metadata")
+        api_request = await session.get(ApiRequest, job.api_request_id)
+        if api_request is None or api_request.request_text != expected_request_text:
+            raise AssertionError("live MCP request_text did not preserve labels")
+        upstream_calls = await UpstreamCallRepository(session).get_by_job_id(job_id)
+        if len(upstream_calls) != 1:
+            raise AssertionError("live MCP job did not persist one upstream call")
+
+
 async def main() -> None:
     if not os.getenv("TRANSITOUS_USER_AGENT", "").strip():
         raise RuntimeError(
@@ -244,6 +480,7 @@ async def main() -> None:
     try:
         for scenario in [*_street_scenarios(), *_transit_scenarios(route_time)]:
             results[scenario.name] = await _run_scenario(scenario)
+        await _run_mcp_e2e(route_time)
     finally:
         await engine.dispose()
 

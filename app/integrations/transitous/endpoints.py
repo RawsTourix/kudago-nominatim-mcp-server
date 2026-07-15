@@ -2,6 +2,13 @@ from datetime import datetime
 from typing import Any
 
 from .http_client import TransitousHttpClient, TransitousInvalidResponseError
+from .routing_policy import (
+    TRANSIT_ACCESS_MODES,
+    TRANSIT_DIRECT_MODES,
+    TRANSIT_EGRESS_MODES,
+    TRANSIT_MAX_ACCESS_SECONDS,
+    TRANSIT_MAX_EGRESS_SECONDS,
+)
 
 
 async def plan_journey(
@@ -34,11 +41,11 @@ async def plan_journey(
             "maxItineraries": num_itineraries,
             "searchWindow": search_window,
             "language": language,
-            "preTransitModes": "WALK",
-            "postTransitModes": "WALK",
-            "directModes": "",
-            "maxPreTransitTime": 900,
-            "maxPostTransitTime": 900,
+            "preTransitModes": ",".join(TRANSIT_ACCESS_MODES),
+            "postTransitModes": ",".join(TRANSIT_EGRESS_MODES),
+            "directModes": ",".join(TRANSIT_DIRECT_MODES),
+            "maxPreTransitTime": TRANSIT_MAX_ACCESS_SECONDS,
+            "maxPostTransitTime": TRANSIT_MAX_EGRESS_SECONDS,
             "detailedLegs": False,
             "detailedTransfers": False,
             "timetableView": True,

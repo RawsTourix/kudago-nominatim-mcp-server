@@ -142,9 +142,11 @@ When only text is known:
    `plan_street_route` for an independent walking/cycling/driving route.
 
 Both routing tools accept an optional label with each coordinate pair and
-preserve it in the result. `plan_public_transport` requires exactly one
-timezone-aware departure or arrival time. Omitted `transport_modes` means all
-provider-supported transit modes; an explicit list restricts the search.
+preserve it in the result and persisted request text. `plan_public_transport`
+requires exactly one timezone-aware departure or arrival time. Omitted
+`transport_modes` means all provider-supported transit modes; an explicit list
+restricts the search. Routing `no_route` responses include structured
+diagnostics and retry hints with both a stable code and agent-readable message.
 `plan_street_route` exposes `travel_mode`, not an ORS profile.
 
 Provider-specific values such as `TRANSIT`, `foot-walking` and

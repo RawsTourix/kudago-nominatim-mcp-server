@@ -47,8 +47,16 @@ responses, MOTIS debug fields, cursors and geometry are absent from MCP data.
 route is returned to the agent. Public-transport `no_route` produces
 `route_verified=false`, an empty route list and `coverage_status=unknown`. It
 is not proof that transport does not exist or that the region is not covered.
-The conditional `remove_mode_restrictions` retry hint appears only when the
-request included an explicit mode list.
+Both routing tools return structured retry hints with `code` and `message`.
+The public-transport walking-limit hint explains the fixed 900-second access
+and egress policy and suggests combining a nearer stop with
+`plan_street_route`. The conditional `remove_mode_restrictions` hint appears
+only when the request included an explicit mode list.
+
+Street `no_route` includes `diagnostic.code=provider_returned_no_route` and
+suggests verifying routeable points or trying a nearby entrance. It means only
+that ORS could not build the exact requested route; it does not prove that no
+physical path exists.
 
 MCP routing data is limited to 128 KiB by removing whole alternatives from the
 end, never part of a leg. Complete persisted results remain available at:
@@ -67,6 +75,13 @@ GET /api/v1/jobs/{job_id}?include_result=true
 
 The FastAPI and worker routing commands remain available regardless of MCP
 catalog visibility. Missing MCP provider configuration is logged as a warning.
+
+`scripts/test_routing_live.py` first exercises the application/provider path,
+then starts a real arq worker and calls one public-transport and one walking
+tool through FastMCP, followed by a known public-transport `no_route` scenario.
+The end-to-end phase verifies the published schema, renamed arguments, labels,
+Redis queue metadata, persisted upstream call, final serialized agent response
+and structured no-route guidance.
 
 ## Provider contracts
 

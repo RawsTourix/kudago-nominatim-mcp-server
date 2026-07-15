@@ -5,6 +5,7 @@ import pytest
 from fastmcp import Client
 
 from app.mcp.server import create_mcp_server
+from app.mcp.schemas.routing import RoutePoint
 from app.mcp.tools import routing
 
 
@@ -70,7 +71,9 @@ async def test_routing_tools_use_shared_mcp_executor(
     assert kwargs["redis"] is fake_mcp_redis.redis
     assert kwargs["command"] == command
     assert kwargs["endpoint"] == f"mcp://tools/{tool_name}"
-    assert kwargs["request_text"] == "55.842,37.18 -> 55.751,37.617"
+    assert kwargs["request_text"] == (
+        "Origin (55.842,37.18) -> Destination (55.751,37.617)"
+    )
     assert kwargs["payload"]["origin_lat"] == 55.842
     assert kwargs["data_factory"].keywords["agent_request"].origin.label == "Origin"
     if tool_name == "plan_street_route":
@@ -79,3 +82,10 @@ async def test_routing_tools_use_shared_mcp_executor(
     else:
         assert kwargs["payload"]["transit_modes"] == ["TRANSIT"]
         assert kwargs["payload"]["num_itineraries"] == 3
+
+
+def test_routing_request_text_falls_back_to_coordinates_without_labels():
+    assert routing._request_text(
+        RoutePoint(latitude=55.842, longitude=37.18),
+        RoutePoint(latitude=55.751, longitude=37.617),
+    ) == "55.842,37.18 -> 55.751,37.617"

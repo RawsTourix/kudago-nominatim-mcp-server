@@ -126,6 +126,7 @@ async def test_actual_fastmcp_schemas_expose_defaults_limits_and_public_fields_o
     }
 
     transit = tools["plan_public_transport"].inputSchema["properties"]
+    transit_tool = tools["plan_public_transport"]
     assert {"TRANSIT", "search_window_seconds", "arrive_by", "language"}.isdisjoint(
         transit
     )
@@ -135,6 +136,19 @@ async def test_actual_fastmcp_schemas_expose_defaults_limits_and_public_fields_o
     assert _schema_value(transit["transport_modes"], "minItems") == 1
     assert transit["max_routes"]["default"] == 3
     assert {"modes", "limit"}.isdisjoint(transit)
+    for time_field in ("departure_time", "arrival_time"):
+        assert (
+            "Exactly one of departure_time and arrival_time is required."
+            in transit[time_field]["description"]
+        )
+    assert (
+        "Provide exactly one timezone-aware departure_time or arrival_time."
+        in transit_tool.description
+    )
+    assert (
+        "Omit transport_modes unless the user explicitly restricts transport types."
+        in transit_tool.description
+    )
     route_point = transit["origin"]["properties"]
     assert set(route_point) == {"latitude", "longitude", "label"}
     assert "same selected location candidate" in route_point["latitude"][

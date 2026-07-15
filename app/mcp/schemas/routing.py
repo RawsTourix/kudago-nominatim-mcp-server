@@ -79,7 +79,8 @@ DepartureTimeInput = Annotated[
         description=(
             "Timezone-aware ISO 8601 earliest departure time. Use when the "
             "journey must leave at or after this moment. Do not combine with "
-            "arrival_time."
+            "arrival_time. Exactly one of departure_time and arrival_time is "
+            "required."
         )
     ),
 ]
@@ -89,7 +90,8 @@ ArrivalTimeInput = Annotated[
         description=(
             "Timezone-aware ISO 8601 latest arrival time. Use when the user "
             "must reach an event before it starts. Do not combine with "
-            "departure_time."
+            "departure_time. Exactly one of departure_time and arrival_time is "
+            "required."
         )
     ),
 ]

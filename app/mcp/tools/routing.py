@@ -77,7 +77,7 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Plan a verified public-transport journey between two coordinate points.
 
-        Use resolve_location first when coordinates are unknown. Walking access, transfers and egress are included. Trust route facts only when result_status is ok and route_verified is true.
+        Provide exactly one timezone-aware departure_time or arrival_time. Omit transport_modes unless the user explicitly restricts transport types. A no_route result applies only to these exact points, time and restrictions. Use resolve_location first when coordinates are unknown. Walking access, transfers and egress are included. Trust route facts only when result_status is ok and route_verified is true.
         """
         tool_name = "plan_public_transport"
         try:
@@ -180,10 +180,12 @@ def _register_street_route_tool(mcp: FastMCP) -> None:
 
 
 def _request_text(origin: RoutePoint, destination: RoutePoint) -> str:
-    return (
-        f"{origin.latitude},{origin.longitude} -> "
-        f"{destination.latitude},{destination.longitude}"
-    )
+    return f"{_point_text(origin)} -> {_point_text(destination)}"
+
+
+def _point_text(point: RoutePoint) -> str:
+    coordinates = f"{point.latitude},{point.longitude}"
+    return f"{point.label} ({coordinates})" if point.label else coordinates
 
 
 __all__ = ["register_routing_tools"]

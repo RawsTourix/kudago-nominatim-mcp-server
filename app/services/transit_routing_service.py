@@ -14,6 +14,13 @@ from app.integrations.transitous import (
     TransitousResponseError,
     plan_journey,
 )
+from app.integrations.transitous.routing_policy import (
+    TRANSIT_ACCESS_MODES,
+    TRANSIT_DIRECT_MODES,
+    TRANSIT_EGRESS_MODES,
+    TRANSIT_MAX_ACCESS_SECONDS,
+    TRANSIT_MAX_EGRESS_SECONDS,
+)
 from app.repositories.upstream_call_repository import UpstreamCallRepository
 from app.schemas.routing import TransitMode, TransitRouteRequest
 
@@ -100,11 +107,11 @@ class TransitRoutingService:
             "num_itineraries": request.num_itineraries,
             "search_window_seconds": request.search_window_seconds,
             "language": request.language,
-            "pre_transit_modes": ["WALK"],
-            "post_transit_modes": ["WALK"],
-            "direct_modes": [],
-            "max_pre_transit_time": 900,
-            "max_post_transit_time": 900,
+            "pre_transit_modes": list(TRANSIT_ACCESS_MODES),
+            "post_transit_modes": list(TRANSIT_EGRESS_MODES),
+            "direct_modes": list(TRANSIT_DIRECT_MODES),
+            "max_pre_transit_time": TRANSIT_MAX_ACCESS_SECONDS,
+            "max_post_transit_time": TRANSIT_MAX_EGRESS_SECONDS,
         }
         client = self.client or TransitousHttpClient(
             base_url=settings.transitous_base_url,
