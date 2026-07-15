@@ -130,13 +130,21 @@ async def test_actual_fastmcp_schemas_expose_defaults_limits_and_public_fields_o
         transit
     )
     assert "TRANSIT" not in _enum_values(
-        transit["modes"], tools["plan_public_transport"].inputSchema
+        transit["transport_modes"], tools["plan_public_transport"].inputSchema
     )
+    assert _schema_value(transit["transport_modes"], "minItems") == 1
+    assert transit["max_routes"]["default"] == 3
+    assert {"modes", "limit"}.isdisjoint(transit)
+    route_point = transit["origin"]["properties"]
+    assert set(route_point) == {"latitude", "longitude", "label"}
+    assert "same selected location candidate" in route_point["latitude"][
+        "description"
+    ]
     street = tools["plan_street_route"].inputSchema["properties"]
     assert _enum_values(
-        street["mode"], tools["plan_street_route"].inputSchema
+        street["travel_mode"], tools["plan_street_route"].inputSchema
     ) == {"walking", "cycling", "driving"}
-    assert {"profile", "language", "include_geometry"}.isdisjoint(street)
+    assert {"mode", "profile", "language", "include_geometry"}.isdisjoint(street)
 
 
 def _missing_property_descriptions(

@@ -15,26 +15,40 @@ Transitous itinerary. `plan_street_route` handles only an independent walking,
 cycling or driving journey. The tools do not call each other and there is no
 provider fallback.
 
-Both tools accept nested `{latitude, longitude}` points. Resolve text first:
+Both tools accept a `RoutePoint` with `latitude`, `longitude` and an optional
+human-readable `label`. The latitude and longitude must come from the same
+selected candidate. Resolve text first:
 
 ```text
 resolve_location -> select confirmed coordinates -> routing tool
 ```
 
-Public MCP modes are lower-case agent values. The mapper converts them to the
-existing application enums; ORS profiles such as `foot-walking` remain
-internal. Street MCP calls always request instructions and disable geometry.
+`plan_public_transport` requires exactly one timezone-aware `departure_time`
+or `arrival_time`. Its public fields are `transport_modes` and `max_routes`;
+omitting `transport_modes` means all transit modes supported by the provider.
+Internally that policy is sent as MOTIS `TRANSIT`, which is not part of the
+agent enum. Transitous access and egress are fixed to walking for at most 900
+seconds each, and independent direct routes are disabled.
+
+`plan_street_route` uses the public `travel_mode` values `walking`, `cycling`
+and `driving`. ORS profiles such as `foot-walking` remain internal. Street MCP
+calls always request instructions and disable geometry.
 
 ## Normalized contracts
 
-Transit routes contain query facts, complete alternatives, warnings and the
-required Transitous/OpenStreetMap attribution. Street routes contain distance,
-duration, bbox, segments and instructions. Provider raw responses, MOTIS debug
-fields, cursors and geometry are absent from MCP data.
+Transit routes use `result_kind=public_transport_routes` and include an
+agent-request summary, complete alternatives, normalized lower-case leg modes,
+warnings and the required Transitous/OpenStreetMap attribution. Street routes
+use `result_kind=street_route` and contain their original labeled points,
+travel mode, distance, duration, bbox, segments and instructions. Provider raw
+responses, MOTIS debug fields, cursors and geometry are absent from MCP data.
 
 `route_verified` is true only when `result_status=ok` and at least one complete
-route is returned to the agent. `no_route` produces `route_verified=false` and
-an empty route list; it is not proof that transport does not exist.
+route is returned to the agent. Public-transport `no_route` produces
+`route_verified=false`, an empty route list and `coverage_status=unknown`. It
+is not proof that transport does not exist or that the region is not covered.
+The conditional `remove_mode_restrictions` retry hint appears only when the
+request included an explicit mode list.
 
 MCP routing data is limited to 128 KiB by removing whole alternatives from the
 end, never part of a leg. Complete persisted results remain available at:

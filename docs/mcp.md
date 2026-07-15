@@ -137,8 +137,15 @@ When only text is known:
 
 1. call `resolve_location`;
 2. select one coordinate candidate;
-3. call `plan_public_transport` for schedules, stops and transfers, or
+3. pass that candidate's latitude and longitude together to
+   `plan_public_transport` for schedules, stops and transfers, or
    `plan_street_route` for an independent walking/cycling/driving route.
+
+Both routing tools accept an optional label with each coordinate pair and
+preserve it in the result. `plan_public_transport` requires exactly one
+timezone-aware departure or arrival time. Omitted `transport_modes` means all
+provider-supported transit modes; an explicit list restricts the search.
+`plan_street_route` exposes `travel_mode`, not an ORS profile.
 
 Provider-specific values such as `TRANSIT`, `foot-walking` and
 `cycling-regular` are not public MCP values.

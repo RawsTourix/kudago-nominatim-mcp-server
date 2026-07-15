@@ -12,6 +12,7 @@ from .routing import (
     PlanPublicTransportInput,
     PlanStreetRouteInput,
     PublicTransportMode,
+    RoutePoint,
     StreetTravelMode,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "PlanPublicTransportInput",
     "PlanStreetRouteInput",
     "PublicTransportMode",
+    "RoutePoint",
     "ResolveLocationInput",
     "StreetTravelMode",
 ]

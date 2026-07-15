@@ -6,9 +6,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.mcp.schemas.common import Coordinates
-
-
 class PublicTransportMode(StrEnum):
     TRAM = "tram"
     SUBWAY = "subway"
@@ -31,14 +28,44 @@ class StreetTravelMode(StrEnum):
     DRIVING = "driving"
 
 
+class RoutePoint(BaseModel):
+    latitude: float = Field(
+        ge=-90,
+        le=90,
+        description=(
+            "Latitude in decimal degrees from the same selected location "
+            "candidate as longitude."
+        ),
+    )
+    longitude: float = Field(
+        ge=-180,
+        le=180,
+        description=(
+            "Longitude in decimal degrees from the same selected location "
+            "candidate as latitude."
+        ),
+    )
+    label: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description=(
+            "Optional human-readable name of this exact coordinate point. "
+            "Examples: 'станция Нахабино', "
+            "'Музей-усадьба Архангельское'. "
+            "The label does not affect routing."
+        ),
+    )
+
+
 OriginInput = Annotated[
-    Coordinates,
+    RoutePoint,
     Field(
         description="Route origin as latitude then longitude in decimal degrees."
     ),
 ]
 DestinationInput = Annotated[
-    Coordinates,
+    RoutePoint,
     Field(
         description=(
             "Route destination as latitude then longitude in decimal degrees; "
@@ -50,8 +77,9 @@ DepartureTimeInput = Annotated[
     datetime | None,
     Field(
         description=(
-            "Timezone-aware ISO 8601 earliest departure time. Do not combine "
-            "with arrival_time; when both are omitted, current time is used."
+            "Timezone-aware ISO 8601 earliest departure time. Use when the "
+            "journey must leave at or after this moment. Do not combine with "
+            "arrival_time."
         )
     ),
 ]
@@ -59,7 +87,8 @@ ArrivalTimeInput = Annotated[
     datetime | None,
     Field(
         description=(
-            "Timezone-aware ISO 8601 latest arrival time. Do not combine with "
+            "Timezone-aware ISO 8601 latest arrival time. Use when the user "
+            "must reach an event before it starts. Do not combine with "
             "departure_time."
         )
     ),
@@ -68,9 +97,18 @@ PublicTransportModesInput = Annotated[
     list[PublicTransportMode] | None,
     Field(
         description=(
-            "Optional allowed public-transport modes. Common values are tram, "
-            "subway, bus and rail; the complete list is in this field's enum. "
-            "Null lets the server use its safe public-transport default set."
+            "Optional explicit restrictions on public-transport modes accepted "
+            "by this MCP facade. Omit the field to allow every transit mode "
+            "supported by the provider. The complete list of values accepted "
+            "by this field is in its enum. Meanings: tram — tram; subway — "
+            "metro/subway; ferry — scheduled ferry; bus — short-distance/local "
+            "bus; coach — long-distance coach; rail — aggregate rail "
+            "restriction including high-speed, long-distance, night, regional, "
+            "suburban and subway; high_speed_rail — high-speed long-distance "
+            "train; long_distance_rail — intercity long-distance train; "
+            "night_rail — night train; regional_rail — regional train; "
+            "suburban_rail — suburban/commuter train; funicular — funicular; "
+            "aerial_lift — suspended cable transport."
         ),
         min_length=1,
     ),
@@ -86,7 +124,7 @@ MaxTransfersInput = Annotated[
         le=10,
     ),
 ]
-RouteLimitInput = Annotated[
+MaxRoutesInput = Annotated[
     int,
     Field(
         description="Maximum route alternatives to request; 1 to 5, default 3.",
@@ -98,7 +136,8 @@ StreetModeInput = Annotated[
     StreetTravelMode,
     Field(
         description=(
-            "Independent street travel mode: walking, cycling or driving. "
+            "Independent street travel mode: walking — pedestrian route; "
+            "cycling — regular bicycle route; driving — passenger-car route. "
             "Public transport is not supported by this tool."
         )
     ),
@@ -110,9 +149,9 @@ class PlanPublicTransportInput(BaseModel):
     destination: DestinationInput
     departure_time: DepartureTimeInput = None
     arrival_time: ArrivalTimeInput = None
-    modes: PublicTransportModesInput = None
+    transport_modes: PublicTransportModesInput = None
     max_transfers: MaxTransfersInput = None
-    limit: RouteLimitInput = 3
+    max_routes: MaxRoutesInput = 3
 
     @field_validator("departure_time", "arrival_time")
     @classmethod
@@ -125,27 +164,34 @@ class PlanPublicTransportInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_route(self):
-        if self.departure_time is not None and self.arrival_time is not None:
+        if (self.departure_time is None) == (self.arrival_time is None):
             raise ValueError(
-                "departure_time and arrival_time cannot be provided together."
+                "Provide exactly one of departure_time or arrival_time."
             )
-        if self.origin == self.destination:
+        if _same_point(self.origin, self.destination):
             raise ValueError("origin and destination must be different.")
-        if self.modes is not None:
-            self.modes = list(dict.fromkeys(self.modes))
+        if self.transport_modes is not None:
+            self.transport_modes = list(dict.fromkeys(self.transport_modes))
         return self
 
 
 class PlanStreetRouteInput(BaseModel):
     origin: OriginInput
     destination: DestinationInput
-    mode: StreetModeInput = StreetTravelMode.WALKING
+    travel_mode: StreetModeInput = StreetTravelMode.WALKING
 
     @model_validator(mode="after")
     def validate_distinct_points(self):
-        if self.origin == self.destination:
+        if _same_point(self.origin, self.destination):
             raise ValueError("origin and destination must be different.")
         return self
+
+
+def _same_point(origin: RoutePoint, destination: RoutePoint) -> bool:
+    return (
+        origin.latitude == destination.latitude
+        and origin.longitude == destination.longitude
+    )
 
 
 __all__ = [
@@ -158,7 +204,8 @@ __all__ = [
     "PlanStreetRouteInput",
     "PublicTransportMode",
     "PublicTransportModesInput",
-    "RouteLimitInput",
+    "MaxRoutesInput",
+    "RoutePoint",
     "StreetModeInput",
     "StreetTravelMode",
 ]

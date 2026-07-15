@@ -12,8 +12,16 @@ from app.mcp.tools import routing
 @pytest.mark.parametrize(
     ("tool_name", "command", "extra_args"),
     [
-        ("plan_public_transport", "routing.transit.plan", {}),
-        ("plan_street_route", "routing.street.plan", {"mode": "cycling"}),
+        (
+            "plan_public_transport",
+            "routing.transit.plan",
+            {"departure_time": "2026-07-15T18:00:00+03:00"},
+        ),
+        (
+            "plan_street_route",
+            "routing.street.plan",
+            {"travel_mode": "cycling"},
+        ),
     ],
 )
 async def test_routing_tools_use_shared_mcp_executor(
@@ -41,8 +49,16 @@ async def test_routing_tools_use_shared_mcp_executor(
         )
     )
     arguments = {
-        "origin": {"latitude": 55.842, "longitude": 37.180},
-        "destination": {"latitude": 55.751, "longitude": 37.617},
+        "origin": {
+            "latitude": 55.842,
+            "longitude": 37.180,
+            "label": "Origin",
+        },
+        "destination": {
+            "latitude": 55.751,
+            "longitude": 37.617,
+            "label": "Destination",
+        },
         **extra_args,
     }
 
@@ -56,6 +72,10 @@ async def test_routing_tools_use_shared_mcp_executor(
     assert kwargs["endpoint"] == f"mcp://tools/{tool_name}"
     assert kwargs["request_text"] == "55.842,37.18 -> 55.751,37.617"
     assert kwargs["payload"]["origin_lat"] == 55.842
+    assert kwargs["data_factory"].keywords["agent_request"].origin.label == "Origin"
     if tool_name == "plan_street_route":
         assert kwargs["payload"]["profile"] == "cycling"
         assert kwargs["payload"]["include_geometry"] is False
+    else:
+        assert kwargs["payload"]["transit_modes"] == ["TRANSIT"]
+        assert kwargs["payload"]["num_itineraries"] == 3

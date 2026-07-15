@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 
 from app.application.contracts import CommandOutput
 from app.mcp.serializers.common import (
@@ -11,7 +12,17 @@ from app.mcp.serializers.events import serialize_events
 from app.mcp.serializers.movie_showings import serialize_movie_showings
 from app.mcp.serializers.movies import serialize_movies
 from app.mcp.serializers.places import serialize_places
-from app.mcp.serializers.routing import serialize_routing
+from app.mcp.schemas.routing import (
+    PlanPublicTransportInput,
+    PlanStreetRouteInput,
+    PublicTransportMode,
+    RoutePoint,
+    StreetTravelMode,
+)
+from app.mcp.serializers.routing import (
+    serialize_public_transport,
+    serialize_street_route,
+)
 
 
 def output(payload):
@@ -277,7 +288,7 @@ def test_movie_showings_exposes_the_default_next_seven_day_window():
     assert "actual_since" not in data.get("applied_filters", {})
 
 
-def test_routing_serializer_removes_geometry_and_marks_verified_status():
+def test_street_route_serializer_preserves_labels_and_removes_geometry():
     payload = {
         "status": "ok",
         "provider": "openrouteservice",
@@ -291,25 +302,45 @@ def test_routing_serializer_removes_geometry_and_marks_verified_status():
         "warnings": [],
         "attribution": [],
     }
-    data = serialize_routing(output(payload))
+    request = PlanStreetRouteInput(
+        origin=RoutePoint(
+            latitude=55.75,
+            longitude=37.61,
+            label="Origin",
+        ),
+        destination=RoutePoint(
+            latitude=55.76,
+            longitude=37.62,
+            label="Destination",
+        ),
+        travel_mode=StreetTravelMode.WALKING,
+    )
+    data = serialize_street_route(output(payload), agent_request=request)
+
+    assert data["result_kind"] == "street_route"
+    assert data["result_status"] == "ok"
     assert data["route_verified"] is True
     assert "geometry" not in data["routes"][0]
     assert data["routes"][0]["geometry_hidden"] is True
-    assert data["mode"] == "walking"
-    assert "profile" not in data
-    assert data["query"]["origin"] == {
+    assert data["request"]["origin"] == {
         "latitude": 55.75,
         "longitude": 37.61,
+        "label": "Origin",
     }
+    assert data["request"]["travel_mode"] == "walking"
+    assert "profile" not in data
+    assert "query" not in data
 
-    no_route = serialize_routing(
-        output({"status": "no_route", "routes": [], "returned": 0})
+    no_route = serialize_street_route(
+        output({"status": "no_route", "routes": [], "returned": 0}),
+        agent_request=request,
     )
+    assert no_route["result_status"] == "no_route"
     assert no_route["route_verified"] is False
     assert no_route["routes"] == []
 
 
-def test_transit_routing_query_uses_agent_time_and_mode_names():
+def test_public_transport_serializer_uses_original_agent_request():
     payload = {
         "status": "ok",
         "provider": "transitous",
@@ -324,10 +355,90 @@ def test_transit_routing_query_uses_agent_time_and_mode_names():
         "returned": 1,
     }
 
-    data = serialize_routing(output(payload))
+    request = PlanPublicTransportInput(
+        origin=RoutePoint(
+            latitude=55.75,
+            longitude=37.61,
+            label="Origin",
+        ),
+        destination=RoutePoint(
+            latitude=55.76,
+            longitude=37.62,
+            label="Destination",
+        ),
+        arrival_time=datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc),
+        transport_modes=[
+            PublicTransportMode.SUBWAY,
+            PublicTransportMode.HIGH_SPEED_RAIL,
+        ],
+        max_transfers=2,
+        max_routes=2,
+    )
+    data = serialize_public_transport(output(payload), agent_request=request)
 
-    assert data["query"]["arrival_time"] == "2026-07-13T12:00:00+03:00"
-    assert data["query"]["modes"] == ["subway", "high_speed_rail"]
-    assert "arrive_by" not in data["query"]
-    assert "time" not in data["query"]
-    assert "transit_modes" not in data["query"]
+    assert data["result_kind"] == "public_transport_routes"
+    assert data["result_status"] == "ok"
+    assert data["request"] == {
+        "origin": {
+            "latitude": 55.75,
+            "longitude": 37.61,
+            "label": "Origin",
+        },
+        "destination": {
+            "latitude": 55.76,
+            "longitude": 37.62,
+            "label": "Destination",
+        },
+        "time_constraint": {
+            "type": "arrival_time",
+            "value": "2026-07-13T12:00:00+00:00",
+        },
+        "transport_mode_policy": "restricted",
+        "transport_modes": ["subway", "high_speed_rail"],
+        "max_transfers": 2,
+        "max_routes": 2,
+        "access_mode": "walking",
+        "egress_mode": "walking",
+        "max_access_seconds": 900,
+        "max_egress_seconds": 900,
+        "direct_routes_enabled": False,
+    }
+    assert "query" not in data
+
+
+def test_public_transport_no_route_has_cautious_conditional_diagnostics():
+    payload = {
+        "status": "no_route",
+        "provider": "transitous",
+        "routes": [],
+        "returned": 0,
+    }
+    unrestricted = PlanPublicTransportInput(
+        origin=RoutePoint(latitude=55.75, longitude=37.61),
+        destination=RoutePoint(latitude=55.76, longitude=37.62),
+        departure_time=datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc),
+    )
+    restricted = unrestricted.model_copy(
+        update={"transport_modes": [PublicTransportMode.SUBURBAN_RAIL]}
+    )
+
+    data = serialize_public_transport(output(payload), agent_request=unrestricted)
+    restricted_data = serialize_public_transport(
+        output(payload),
+        agent_request=restricted,
+    )
+
+    assert data["result_status"] == "no_route"
+    assert data["route_verified"] is False
+    assert data["diagnostic"] == {
+        "code": "provider_returned_no_itineraries",
+        "coverage_status": "unknown",
+        "message": (
+            "The provider returned no itinerary for the exact requested points, "
+            "time and restrictions."
+        ),
+    }
+    assert data["request"]["transport_mode_policy"] == "all_provider_supported"
+    assert data["request"]["transport_modes"] is None
+    assert "remove_mode_restrictions" not in data["retry_hints"]
+    assert restricted_data["retry_hints"][-1] == "remove_mode_restrictions"

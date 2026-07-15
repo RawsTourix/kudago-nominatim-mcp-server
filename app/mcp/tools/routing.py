@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from functools import partial
 from typing import Any
 
 from fastmcp import Context, FastMCP
@@ -10,21 +10,24 @@ from pydantic import ValidationError
 from app.core.config import Settings, settings
 from app.mcp.executor import run_mcp_command
 from app.mcp.mappers import STREET_MODE_MAP, transit_modes, transit_time
-from app.mcp.schemas.common import Coordinates
 from app.mcp.schemas.routing import (
     ArrivalTimeInput,
     DepartureTimeInput,
     DestinationInput,
+    MaxRoutesInput,
     MaxTransfersInput,
     OriginInput,
     PlanPublicTransportInput,
     PlanStreetRouteInput,
     PublicTransportModesInput,
-    RouteLimitInput,
+    RoutePoint,
     StreetModeInput,
     StreetTravelMode,
 )
-from app.mcp.serializers import serialize_routing
+from app.mcp.serializers import (
+    serialize_public_transport,
+    serialize_street_route,
+)
 from app.mcp.tools._common import (
     MCP_FACADE_VERSION,
     READ_ONLY_TOOL_ANNOTATIONS,
@@ -68,9 +71,9 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
         destination: DestinationInput,
         departure_time: DepartureTimeInput = None,
         arrival_time: ArrivalTimeInput = None,
-        modes: PublicTransportModesInput = None,
+        transport_modes: PublicTransportModesInput = None,
         max_transfers: MaxTransfersInput = None,
-        limit: RouteLimitInput = 3,
+        max_routes: MaxRoutesInput = 3,
     ) -> dict[str, Any]:
         """Plan a verified public-transport journey between two coordinate points.
 
@@ -83,9 +86,9 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
                 destination=destination,
                 departure_time=departure_time,
                 arrival_time=arrival_time,
-                modes=modes,
+                transport_modes=transport_modes,
                 max_transfers=max_transfers,
-                limit=limit,
+                max_routes=max_routes,
             )
             effective_time, arrive_by = transit_time(
                 agent_request.departure_time,
@@ -98,9 +101,9 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
                 destination_lon=agent_request.destination.longitude,
                 time=effective_time,
                 arrive_by=arrive_by,
-                transit_modes=transit_modes(agent_request.modes),
+                transit_modes=transit_modes(agent_request.transport_modes),
                 max_transfers=agent_request.max_transfers,
-                num_itineraries=agent_request.limit,
+                num_itineraries=agent_request.max_routes,
                 language="ru",
             )
         except ValidationError as exc:
@@ -116,7 +119,10 @@ def _register_public_transport_tool(mcp: FastMCP) -> None:
             command="routing.transit.plan",
             payload=request.model_dump(mode="json"),
             request_text=_request_text(agent_request.origin, agent_request.destination),
-            data_factory=serialize_routing,
+            data_factory=partial(
+                serialize_public_transport,
+                agent_request=agent_request,
+            ),
         )
 
 
@@ -130,7 +136,7 @@ def _register_street_route_tool(mcp: FastMCP) -> None:
         ctx: Context,
         origin: OriginInput,
         destination: DestinationInput,
-        mode: StreetModeInput = StreetTravelMode.WALKING,
+        travel_mode: StreetModeInput = StreetTravelMode.WALKING,
     ) -> dict[str, Any]:
         """Plan a verified independent walking, cycling or driving route between two coordinate points.
 
@@ -141,14 +147,14 @@ def _register_street_route_tool(mcp: FastMCP) -> None:
             agent_request = PlanStreetRouteInput(
                 origin=origin,
                 destination=destination,
-                mode=mode,
+                travel_mode=travel_mode,
             )
             request = StreetRouteRequest(
                 origin_lat=agent_request.origin.latitude,
                 origin_lon=agent_request.origin.longitude,
                 destination_lat=agent_request.destination.latitude,
                 destination_lon=agent_request.destination.longitude,
-                profile=STREET_MODE_MAP[agent_request.mode],
+                profile=STREET_MODE_MAP[agent_request.travel_mode],
                 language="ru",
                 include_instructions=True,
                 include_geometry=False,
@@ -166,11 +172,14 @@ def _register_street_route_tool(mcp: FastMCP) -> None:
             command="routing.street.plan",
             payload=request.model_dump(mode="json"),
             request_text=_request_text(agent_request.origin, agent_request.destination),
-            data_factory=serialize_routing,
+            data_factory=partial(
+                serialize_street_route,
+                agent_request=agent_request,
+            ),
         )
 
 
-def _request_text(origin: Coordinates, destination: Coordinates) -> str:
+def _request_text(origin: RoutePoint, destination: RoutePoint) -> str:
     return (
         f"{origin.latitude},{origin.longitude} -> "
         f"{destination.latitude},{destination.longitude}"

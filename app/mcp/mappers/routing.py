@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.mcp.schemas.routing import PublicTransportMode, StreetTravelMode
 from app.schemas.routing import StreetRouteProfile, TransitMode
@@ -34,14 +34,16 @@ def transit_time(
 ) -> tuple[datetime, bool]:
     if arrival_time is not None:
         return arrival_time, True
-    return departure_time or datetime.now(timezone.utc), False
+    if departure_time is not None:
+        return departure_time, False
+    raise ValueError("Provide exactly one of departure_time or arrival_time.")
 
 
 def transit_modes(
     modes: list[PublicTransportMode] | None,
-) -> list[TransitMode] | None:
+) -> list[TransitMode]:
     if modes is None:
-        return None
+        return [TransitMode.TRANSIT]
     return [PUBLIC_TRANSPORT_MODE_MAP[mode] for mode in modes]
 
 

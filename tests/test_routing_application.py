@@ -9,20 +9,25 @@ from app.application.contracts import CommandOutput, ExecutionContext
 from app.application.executor import CommandExecutor
 from app.application.handlers.street_routing import StreetRoutingHandler
 from app.application.handlers.transit_routing import TransitRoutingHandler
-from app.integrations.openrouteservice import OpenRouteServiceResponseError
+from app.integrations.openrouteservice import (
+    OpenRouteServiceInvalidResponseError,
+    OpenRouteServiceResponseError,
+)
 from app.integrations.transitous import (
     TransitousInvalidResponseError,
     TransitousResponseError,
 )
 from app.schemas.routing import (
+    StreetRouteProfile,
     StreetRouteRequest,
     TransitMode,
     TransitRouteRequest,
 )
-from app.services.street_routing_service import StreetRoutingService
+from app.services.street_routing_service import PROFILE_MAP, StreetRoutingService
 from app.services.transit_routing_service import (
-    DEFAULT_TRANSIT_MODES,
+    PROVIDER_MODE_NAMES,
     TransitRoutingService,
+    normalize_provider_mode,
 )
 
 
@@ -135,7 +140,8 @@ async def test_transit_service_normalizes_itinerary_and_tracks_call():
     route = result["routes"][0]
     assert route["has_realtime_data"] is True
     assert route["has_cancellations"] is False
-    assert route["legs"][0]["mode"] == "WALK"
+    assert route["legs"][0]["mode"] == "walking"
+    assert route["legs"][1]["mode"] == "subway"
     assert route["legs"][1]["route_short_name"] == "U2"
     assert route["legs"][1]["headsign"] == "Ruhleben"
     assert route["legs"][1]["scheduled_departure_time"].endswith("+02:00")
@@ -144,14 +150,18 @@ async def test_transit_service_normalizes_itinerary_and_tracks_call():
     assert tracked["provider"] == "transitous"
     assert tracked["url_path"] == "/api/v6/plan"
     sent_params = client.get.await_args.args[1]
-    assert sent_params["transitModes"] == [
-        mode.value for mode in DEFAULT_TRANSIT_MODES
-    ]
-    assert "TRANSIT" not in sent_params["transitModes"]
+    assert sent_params["transitModes"] == ["TRANSIT"]
+    assert sent_params["preTransitModes"] == "WALK"
+    assert sent_params["postTransitModes"] == "WALK"
+    assert sent_params["directModes"] == ""
+    assert sent_params["maxPreTransitTime"] == 900
+    assert sent_params["maxPostTransitTime"] == 900
+    assert tracked["request_payload"]["max_pre_transit_time"] == 900
+    assert tracked["request_payload"]["max_post_transit_time"] == 900
 
 
 @pytest.mark.asyncio
-async def test_transit_service_treats_explicit_transit_as_safe_alias():
+async def test_transit_service_preserves_explicit_transit_mode():
     client = SimpleNamespace(get=AsyncMock(return_value={"itineraries": []}))
     service = TransitRoutingService(SimpleNamespace(), client=client)
     service.upstream_call_repo = SimpleNamespace(create=AsyncMock())
@@ -161,7 +171,7 @@ async def test_transit_service_treats_explicit_transit_as_safe_alias():
         request=transit_request(transit_modes=[TransitMode.TRANSIT]),
     )
 
-    expected = [mode.value for mode in DEFAULT_TRANSIT_MODES]
+    expected = ["TRANSIT"]
     assert result["query"]["transit_modes"] == expected
     assert client.get.await_args.args[1]["transitModes"] == expected
 
@@ -238,7 +248,7 @@ def test_transit_service_collects_and_deduplicates_place_warnings():
     result = TransitRoutingService._normalize(
         raw,
         transit_request(),
-        [mode.value for mode in DEFAULT_TRANSIT_MODES],
+        ["TRANSIT"],
     )
 
     route = result["routes"][0]
@@ -255,6 +265,101 @@ def test_transit_service_collects_and_deduplicates_place_warnings():
     assert warning_types.count("stop_cancelled") == 1
     assert warning_types.count("pickup_not_allowed") == 1
     assert warning_types.count("dropoff_not_allowed") == 1
+    assert result["warnings"] == route["warnings"]
+
+
+def test_all_documented_provider_leg_modes_are_normalized():
+    assert PROVIDER_MODE_NAMES == {
+        "WALK": "walking",
+        "BIKE": "cycling",
+        "RENTAL": "rental",
+        "CAR": "driving",
+        "CAR_PARKING": "car_parking",
+        "CAR_DROPOFF": "car_dropoff",
+        "ODM": "on_demand_transport",
+        "RIDE_SHARING": "ride_sharing",
+        "FLEX": "flexible_transport",
+        "TRANSIT": "transit",
+        "TRAM": "tram",
+        "SUBWAY": "subway",
+        "FERRY": "ferry",
+        "AIRPLANE": "airplane",
+        "BUS": "bus",
+        "COACH": "coach",
+        "RAIL": "rail",
+        "HIGHSPEED_RAIL": "high_speed_rail",
+        "LONG_DISTANCE": "long_distance_rail",
+        "NIGHT_RAIL": "night_rail",
+        "REGIONAL_FAST_RAIL": "regional_fast_rail",
+        "REGIONAL_RAIL": "regional_rail",
+        "SUBURBAN": "suburban_rail",
+        "FUNICULAR": "funicular",
+        "AERIAL_LIFT": "aerial_lift",
+        "OTHER": "other",
+        "AREAL_LIFT": "aerial_lift",
+        "METRO": "suburban_rail",
+        "CABLE_CAR": "cable_car",
+    }
+    for provider_mode, public_mode in PROVIDER_MODE_NAMES.items():
+        assert normalize_provider_mode(provider_mode) == (public_mode, [])
+
+
+@pytest.mark.parametrize(
+    "provider_mode",
+    ["DEBUG_BUS_ROUTE", "DEBUG_RAILWAY_ROUTE", "DEBUG_FERRY_ROUTE"],
+)
+def test_debug_provider_modes_are_lowercased_with_warning(provider_mode):
+    mode, warnings = normalize_provider_mode(provider_mode)
+
+    assert mode == provider_mode.lower()
+    assert warnings == [
+        {
+            "type": "provider_debug_mode",
+            "provider_mode": provider_mode,
+            "normalized_mode": provider_mode.lower(),
+        }
+    ]
+
+
+def test_bicycle_is_not_treated_as_a_provider_leg_mode():
+    assert "BICYCLE" not in PROVIDER_MODE_NAMES
+    assert normalize_provider_mode("BICYCLE") == (
+        "bicycle",
+        [
+            {
+                "type": "unknown_provider_mode",
+                "provider_mode": "BICYCLE",
+                "normalized_mode": "bicycle",
+            }
+        ],
+    )
+
+
+def test_provider_mode_warnings_are_exposed_on_route_and_result():
+    result = TransitRoutingService._normalize(
+        {
+            "itineraries": [
+                {
+                    "legs": [
+                        {"mode": "DEBUG_BUS_ROUTE"},
+                        {"mode": "NEW_PROVIDER_MODE"},
+                    ]
+                }
+            ]
+        },
+        transit_request(),
+        ["TRANSIT"],
+    )
+
+    route = result["routes"][0]
+    assert [leg["mode"] for leg in route["legs"]] == [
+        "debug_bus_route",
+        "new_provider_mode",
+    ]
+    assert [warning["type"] for warning in route["warnings"]] == [
+        "provider_debug_mode",
+        "unknown_provider_mode",
+    ]
     assert result["warnings"] == route["warnings"]
 
 
@@ -336,6 +441,22 @@ def test_street_service_omits_steps_and_geometry_when_disabled():
     route = result["routes"][0]
     assert route["segments"][0]["steps"] == []
     assert route["geometry"] is None
+
+
+def test_street_profiles_map_to_the_documented_ors_profiles():
+    assert PROFILE_MAP == {
+        StreetRouteProfile.WALKING: "foot-walking",
+        StreetRouteProfile.CYCLING: "cycling-regular",
+        StreetRouteProfile.DRIVING: "driving-car",
+    }
+
+
+def test_street_service_keeps_other_provider_error_codes_as_errors():
+    with pytest.raises(OpenRouteServiceInvalidResponseError):
+        StreetRoutingService._normalize(
+            {"error": {"code": 2010, "message": "invalid request"}},
+            street_request(),
+        )
 
 
 @pytest.mark.asyncio
@@ -484,3 +605,52 @@ async def test_no_route_is_persisted_as_succeeded_job():
         result_payload=output.result_payload,
     )
     executor.job_repo.mark_failed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_full_routing_result_is_persisted_before_mcp_compaction():
+    job = SimpleNamespace(id=uuid4(), command="routing.street.plan")
+    full_route = {
+        "geometry": "encoded-polyline",
+        "segments": [{"instruction": "x" * 140_000}],
+    }
+    output = CommandOutput(
+        status="ok",
+        result_type="routing.street.plan",
+        items=[full_route],
+        meta={"provider": "openrouteservice", "returned": 1},
+        result_payload={
+            "status": "ok",
+            "provider": "openrouteservice",
+            "returned": 1,
+            "routes": [full_route],
+        },
+    )
+    executor = CommandExecutor(SimpleNamespace())
+    executor.job_repo = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=job),
+        mark_running=AsyncMock(),
+        mark_succeeded=AsyncMock(),
+        mark_failed=AsyncMock(),
+        add_event=AsyncMock(),
+    )
+    executor.result_repo = SimpleNamespace(create=AsyncMock())
+    executor._dispatch = AsyncMock(return_value=output)
+
+    await executor.run_payload(
+        job_id=job.id,
+        command=job.command,
+        payload={},
+        source="test",
+    )
+
+    executor.result_repo.create.assert_awaited_once_with(
+        job_id=job.id,
+        result_type="routing.street.plan",
+        items=[full_route],
+        meta={"provider": "openrouteservice", "returned": 1},
+    )
+    executor.job_repo.mark_succeeded.assert_awaited_once_with(
+        job,
+        result_payload=output.result_payload,
+    )

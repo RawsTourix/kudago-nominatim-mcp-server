@@ -1,8 +1,10 @@
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -12,104 +14,244 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-from app.integrations.openrouteservice import OpenRouteServiceHttpClient, directions
-from app.integrations.transitous import TransitousHttpClient, plan_journey
+from app.application.executor import CommandExecutor
+from app.core.db import AsyncSessionLocal, engine
+from app.repositories.job_repository import JobRepository
+from app.repositories.upstream_call_repository import UpstreamCallRepository
+from app.schemas.routing import (
+    StreetRouteProfile,
+    StreetRouteRequest,
+    TransitMode,
+    TransitRouteRequest,
+)
 
 
 BERLIN_ALEXANDERPLATZ = (52.5219, 13.4132)
 BERLIN_HAUPTBAHNHOF = (52.5251, 13.3694)
-SAFE_TRANSIT_MODES = [
-    "TRAM",
-    "SUBWAY",
-    "FERRY",
-    "BUS",
-    "COACH",
-    "RAIL",
-    "FUNICULAR",
-    "AERIAL_LIFT",
-]
+NAKHABINO_STATION = (55.8415879, 37.184911)
+ARKHANGELSKOYE_MUSEUM = (55.7885844, 37.2859336)
+MOSCOW_BELORUSSKY_STATION = (55.776397, 37.580345)
+SHORT_STREET_DESTINATION = (55.8450, 37.1950)
 
 
-async def run_transitous() -> None:
-    user_agent = os.getenv("TRANSITOUS_USER_AGENT", "").strip()
-    if not user_agent:
-        raise RuntimeError(
-            "Set TRANSITOUS_USER_AGENT with application name, version and contact"
+@dataclass(frozen=True, slots=True)
+class SmokeScenario:
+    name: str
+    command: str
+    request: TransitRouteRequest | StreetRouteRequest
+    expected_provider: str
+    require_route: bool
+
+
+async def _run_scenario(scenario: SmokeScenario) -> dict[str, Any]:
+    payload = scenario.request.model_dump(mode="json")
+    async with AsyncSessionLocal() as session:
+        job = await JobRepository(session).create(
+            command=scenario.command,
+            input_payload=payload,
         )
-    base_url = os.getenv("TRANSITOUS_BASE_URL", "https://api.transitous.org/")
-    timeout = float(os.getenv("TRANSITOUS_TIMEOUT_SECONDS", "40"))
-    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
-    origin = f"{BERLIN_ALEXANDERPLATZ[0]},{BERLIN_ALEXANDERPLATZ[1]}"
-    destination = f"{BERLIN_HAUPTBAHNHOF[0]},{BERLIN_HAUPTBAHNHOF[1]}"
-    scenarios = [
-        ("transit-default", False, SAFE_TRANSIT_MODES),
-        ("transit-arrive-by", True, SAFE_TRANSIT_MODES),
-        ("transit-restricted", False, ["SUBURBAN", "SUBWAY", "BUS"]),
-    ]
-
-    async with TransitousHttpClient(
-        base_url=base_url,
-        timeout=timeout,
-        user_agent=user_agent,
-    ) as client:
-        for name, arrive_by, modes in scenarios:
-            result = await plan_journey(
-                client,
-                from_place=origin,
-                to_place=destination,
-                time=tomorrow,
-                arrive_by=arrive_by,
-                transit_modes=modes,
-                max_transfers=None,
-                max_travel_time=180,
-                min_transfer_time=None,
-                num_itineraries=3,
-                search_window=900,
-                language="en",
+        output = await CommandExecutor(session).run_payload(
+            job_id=job.id,
+            command=scenario.command,
+            payload=payload,
+            source="routing-live-smoke",
+            endpoint=f"script://routing-live-smoke/{scenario.name}",
+        )
+        calls = await UpstreamCallRepository(session).get_by_job_id(job.id)
+        if len(calls) != 1:
+            raise AssertionError(
+                f"{scenario.name}: expected one persisted upstream call, got {len(calls)}"
             )
-            print(f"{name}: itineraries={len(result.get('itineraries', []))}")
+        call = calls[0]
+        if call.provider != scenario.expected_provider:
+            raise AssertionError(
+                f"{scenario.name}: unexpected provider {call.provider!r}"
+            )
+        if not isinstance(call.request_payload, dict):
+            raise AssertionError(
+                f"{scenario.name}: raw request_payload was not persisted"
+            )
+        if not isinstance(call.response_payload, dict):
+            raise AssertionError(
+                f"{scenario.name}: raw response_payload was not persisted"
+            )
+
+        _verify_persisted_upstream_call(scenario, call.request_payload)
+        await session.commit()
+
+        route_count = len(output.result_payload.get("routes", []))
+        if scenario.require_route and not (
+            output.status == "ok" and route_count > 0
+        ):
+            raise AssertionError(
+                f"{scenario.name}: expected a verified route, "
+                f"got status={output.status!r}, routes={route_count}"
+            )
+        response_collection = (
+            "itineraries"
+            if scenario.expected_provider == "transitous"
+            else "routes"
+        )
+        raw_items = call.response_payload.get(response_collection)
+        raw_count = len(raw_items) if isinstance(raw_items, list) else None
+        print(
+            f"{scenario.name}: status={output.status}, routes={route_count}, "
+            f"raw_{response_collection}={raw_count}, "
+            f"upstream_payloads=verified, job_id={job.id}"
+        )
+        return {
+            "status": output.status,
+            "route_count": route_count,
+            "job_id": str(job.id),
+        }
 
 
-async def run_openrouteservice() -> None:
-    api_key = os.getenv("OPENROUTESERVICE_API_KEY", "").strip()
-    if not api_key:
-        print("OpenRouteService live checks skipped: OPENROUTESERVICE_API_KEY is empty")
+def _verify_persisted_upstream_call(
+    scenario: SmokeScenario,
+    request_payload: dict[str, Any],
+) -> None:
+    if scenario.expected_provider == "transitous":
+        expected_modes = [
+            mode.value
+            for mode in scenario.request.transit_modes
+        ] if scenario.request.transit_modes is not None else ["TRANSIT"]
+        expected = {
+            "transit_modes": expected_modes,
+            "pre_transit_modes": ["WALK"],
+            "post_transit_modes": ["WALK"],
+            "direct_modes": [],
+            "max_pre_transit_time": 900,
+            "max_post_transit_time": 900,
+        }
+        for key, value in expected.items():
+            if request_payload.get(key) != value:
+                raise AssertionError(
+                    f"{scenario.name}: persisted {key} does not match {value!r}"
+                )
         return
-    base_url = os.getenv(
-        "OPENROUTESERVICE_BASE_URL",
-        "https://api.openrouteservice.org/",
-    )
-    timeout = float(os.getenv("OPENROUTESERVICE_TIMEOUT_SECONDS", "30"))
-    user_agent = os.getenv(
-        "OPENROUTESERVICE_USER_AGENT",
-        "kudago-nominatim-service/0.1.0",
-    )
-    coordinates = [
-        [BERLIN_ALEXANDERPLATZ[1], BERLIN_ALEXANDERPLATZ[0]],
-        [BERLIN_HAUPTBAHNHOF[1], BERLIN_HAUPTBAHNHOF[0]],
+
+    if request_payload.get("profile") != scenario.request.profile.value:
+        raise AssertionError(
+            f"{scenario.name}: persisted ORS profile does not match request"
+        )
+    if request_payload.get("geometry") is not False:
+        raise AssertionError(
+            f"{scenario.name}: persisted ORS request unexpectedly enabled geometry"
+        )
+
+
+def _transit_scenarios(route_time: datetime) -> list[SmokeScenario]:
+    common = {
+        "time": route_time,
+        "max_travel_time_minutes": 240,
+        "num_itineraries": 3,
+        "language": "en",
+    }
+    return [
+        SmokeScenario(
+            name="transit-covered-all-provider-supported",
+            command="routing.transit.plan",
+            request=TransitRouteRequest(
+                origin_lat=BERLIN_ALEXANDERPLATZ[0],
+                origin_lon=BERLIN_ALEXANDERPLATZ[1],
+                destination_lat=BERLIN_HAUPTBAHNHOF[0],
+                destination_lon=BERLIN_HAUPTBAHNHOF[1],
+                transit_modes=None,
+                **common,
+            ),
+            expected_provider="transitous",
+            require_route=True,
+        ),
+        SmokeScenario(
+            name="transit-covered-explicit-suburban",
+            command="routing.transit.plan",
+            request=TransitRouteRequest(
+                origin_lat=BERLIN_ALEXANDERPLATZ[0],
+                origin_lon=BERLIN_ALEXANDERPLATZ[1],
+                destination_lat=BERLIN_HAUPTBAHNHOF[0],
+                destination_lon=BERLIN_HAUPTBAHNHOF[1],
+                transit_modes=[TransitMode.SUBURBAN],
+                **common,
+            ),
+            expected_provider="transitous",
+            require_route=True,
+        ),
+        SmokeScenario(
+            name="transit-nakhabino-arkhangelskoye",
+            command="routing.transit.plan",
+            request=TransitRouteRequest(
+                origin_lat=NAKHABINO_STATION[0],
+                origin_lon=NAKHABINO_STATION[1],
+                destination_lat=ARKHANGELSKOYE_MUSEUM[0],
+                destination_lon=ARKHANGELSKOYE_MUSEUM[1],
+                transit_modes=None,
+                **common,
+            ),
+            expected_provider="transitous",
+            require_route=False,
+        ),
+        SmokeScenario(
+            name="transit-nakhabino-moscow",
+            command="routing.transit.plan",
+            request=TransitRouteRequest(
+                origin_lat=NAKHABINO_STATION[0],
+                origin_lon=NAKHABINO_STATION[1],
+                destination_lat=MOSCOW_BELORUSSKY_STATION[0],
+                destination_lon=MOSCOW_BELORUSSKY_STATION[1],
+                transit_modes=None,
+                **common,
+            ),
+            expected_provider="transitous",
+            require_route=False,
+        ),
     ]
 
-    async with OpenRouteServiceHttpClient(
-        api_key=api_key,
-        base_url=base_url,
-        timeout=timeout,
-        user_agent=user_agent,
-    ) as client:
-        for profile in ("foot-walking", "driving-car", "cycling-regular"):
-            result = await directions(
-                client,
+
+def _street_scenarios() -> list[SmokeScenario]:
+    return [
+        SmokeScenario(
+            name=f"ors-short-{profile.value}",
+            command="routing.street.plan",
+            request=StreetRouteRequest(
+                origin_lat=NAKHABINO_STATION[0],
+                origin_lon=NAKHABINO_STATION[1],
+                destination_lat=SHORT_STREET_DESTINATION[0],
+                destination_lon=SHORT_STREET_DESTINATION[1],
                 profile=profile,
-                coordinates=coordinates,
-                language="en",
-                instructions=True,
-                geometry=False,
-            )
-            print(f"ors-{profile}: routes={len(result.get('routes', []))}")
+                include_geometry=False,
+            ),
+            expected_provider="openrouteservice",
+            require_route=True,
+        )
+        for profile in (
+            StreetRouteProfile.WALKING,
+            StreetRouteProfile.CYCLING,
+            StreetRouteProfile.DRIVING,
+        )
+    ]
 
 
 async def main() -> None:
-    await run_transitous()
-    await run_openrouteservice()
+    if not os.getenv("TRANSITOUS_USER_AGENT", "").strip():
+        raise RuntimeError(
+            "Set TRANSITOUS_USER_AGENT with application name, version and contact"
+        )
+    if not os.getenv("OPENROUTESERVICE_API_KEY", "").strip():
+        raise RuntimeError("Set OPENROUTESERVICE_API_KEY for the live smoke")
+
+    route_time = datetime.now(timezone.utc) + timedelta(days=1)
+    results: dict[str, dict[str, Any]] = {}
+    try:
+        for scenario in [*_street_scenarios(), *_transit_scenarios(route_time)]:
+            results[scenario.name] = await _run_scenario(scenario)
+    finally:
+        await engine.dispose()
+
+    moscow = results["transit-nakhabino-moscow"]
+    if moscow["status"] == "ok" and moscow["route_count"] > 0:
+        print("moscow_coverage=confirmed_for_exact_nakhabino_moscow_query")
+    else:
+        print("moscow_coverage=unknown_from_plan_response")
 
 
 if __name__ == "__main__":

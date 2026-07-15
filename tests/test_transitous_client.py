@@ -58,6 +58,8 @@ async def test_transitous_plan_serializes_required_parameters():
     assert params["preTransitModes"] == "WALK"
     assert params["postTransitModes"] == "WALK"
     assert params["directModes"] == ""
+    assert params["maxPreTransitTime"] == "900"
+    assert params["maxPostTransitTime"] == "900"
     assert params["detailedLegs"] == "false"
     assert params["detailedTransfers"] == "false"
     assert params["timetableView"] == "true"

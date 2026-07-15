@@ -1,5 +1,7 @@
+from app.mcp.schemas.routing import PlanStreetRouteInput, RoutePoint
 from app.application.contracts import CommandOutput
 from app.mcp.serializers.details import serialize_details
+from app.mcp.serializers.routing import serialize_street_route
 from app.mcp.serializers.common import (
     DETAIL_RESPONSE_LIMIT_BYTES,
     ROUTING_RESPONSE_LIMIT_BYTES,
@@ -46,6 +48,39 @@ def test_routing_limit_removes_whole_alternatives_not_legs():
     assert json_size(limited) <= ROUTING_RESPONSE_LIMIT_BYTES
     assert limited["truncated"] is True
     assert all(len(route["legs"]) == 1 for route in limited["routes"])
+
+
+def test_street_serializer_caps_agent_data_without_mutating_full_result():
+    payload = {
+        "status": "ok",
+        "provider": "openrouteservice",
+        "returned": 3,
+        "warnings": [],
+        "attribution": [],
+        "routes": [
+            {"id": index, "segments": [{"instruction": "x" * 70_000}]}
+            for index in range(3)
+        ],
+    }
+    output = CommandOutput(
+        status="ok",
+        result_type="routing.street.plan",
+        items=payload["routes"],
+        meta={},
+        result_payload=payload,
+    )
+    request = PlanStreetRouteInput(
+        origin=RoutePoint(latitude=55.75, longitude=37.61),
+        destination=RoutePoint(latitude=55.76, longitude=37.62),
+    )
+
+    data = serialize_street_route(output, agent_request=request)
+
+    assert json_size(data) <= ROUTING_RESPONSE_LIMIT_BYTES
+    assert data["truncated"] is True
+    assert data["full_result_available"] is True
+    assert data["returned_to_agent"] == len(data["routes"])
+    assert len(payload["routes"]) == 3
 
 
 def test_details_removes_whole_comments_and_showings_to_fit_128_kib():

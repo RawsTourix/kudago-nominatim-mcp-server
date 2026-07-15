@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.mcp.mappers.time_window import resolve_calendar_timezone, to_utc_window
+from app.mcp.mappers.routing import transit_modes, transit_time
 from app.mcp.reference_data import (
     EventCategory,
     KudaGoLocationSlug,
@@ -20,6 +21,7 @@ from app.mcp.schemas.routing import (
     PlanPublicTransportInput,
     PlanStreetRouteInput,
     PublicTransportMode,
+    RoutePoint,
 )
 
 
@@ -163,21 +165,23 @@ def test_calendar_timezone_is_required_for_unmapped_places_and_coordinates():
 
 
 def test_routing_rejects_naive_time_and_conflicting_time_semantics():
-    origin = Coordinates(latitude=55.75, longitude=37.61)
-    destination = Coordinates(latitude=55.76, longitude=37.62)
+    origin = RoutePoint(latitude=55.75, longitude=37.61)
+    destination = RoutePoint(latitude=55.76, longitude=37.62)
     with pytest.raises(ValidationError, match="timezone"):
         PlanPublicTransportInput(
             origin=origin,
             destination=destination,
             departure_time=datetime(2026, 7, 13, 12, 0),
         )
-    with pytest.raises(ValidationError, match="cannot be provided together"):
+    with pytest.raises(ValidationError, match="exactly one"):
         PlanPublicTransportInput(
             origin=origin,
             destination=destination,
             departure_time="2026-07-13T12:00:00+03:00",
             arrival_time="2026-07-13T13:00:00+03:00",
         )
+    with pytest.raises(ValidationError, match="exactly one"):
+        PlanPublicTransportInput(origin=origin, destination=destination)
 
     with pytest.raises(ValidationError, match="must be different"):
         PlanStreetRouteInput(origin=origin, destination=origin)
@@ -185,14 +189,46 @@ def test_routing_rejects_naive_time_and_conflicting_time_semantics():
 
 def test_routing_modes_are_a_deduplicated_agent_enum():
     request = PlanPublicTransportInput(
-        origin=Coordinates(latitude=55.75, longitude=37.61),
-        destination=Coordinates(latitude=55.76, longitude=37.62),
-        modes=[PublicTransportMode.SUBWAY, PublicTransportMode.SUBWAY],
+        origin=RoutePoint(latitude=55.75, longitude=37.61),
+        destination=RoutePoint(latitude=55.76, longitude=37.62),
+        departure_time="2026-07-13T12:00:00+03:00",
+        transport_modes=[PublicTransportMode.SUBWAY, PublicTransportMode.SUBWAY],
     )
-    assert request.modes == [PublicTransportMode.SUBWAY]
+    assert request.transport_modes == [PublicTransportMode.SUBWAY]
     with pytest.raises(ValidationError):
         PlanPublicTransportInput(
-            origin=Coordinates(latitude=55.75, longitude=37.61),
-            destination=Coordinates(latitude=55.76, longitude=37.62),
-            modes=["TRANSIT"],
+            origin=RoutePoint(latitude=55.75, longitude=37.61),
+            destination=RoutePoint(latitude=55.76, longitude=37.62),
+            departure_time="2026-07-13T12:00:00+03:00",
+            transport_modes=["TRANSIT"],
         )
+    with pytest.raises(ValidationError):
+        PlanPublicTransportInput(
+            origin=RoutePoint(latitude=55.75, longitude=37.61),
+            destination=RoutePoint(latitude=55.76, longitude=37.62),
+            departure_time="2026-07-13T12:00:00+03:00",
+            transport_modes=[],
+        )
+
+
+def test_route_point_label_does_not_change_coordinate_identity():
+    with pytest.raises(ValidationError, match="must be different"):
+        PlanStreetRouteInput(
+            origin=RoutePoint(
+                latitude=55.75,
+                longitude=37.61,
+                label="Origin label",
+            ),
+            destination=RoutePoint(
+                latitude=55.75,
+                longitude=37.61,
+                label="Different label",
+            ),
+        )
+
+
+def test_routing_mapper_has_no_implicit_time_or_mode_expansion():
+    with pytest.raises(ValueError, match="exactly one"):
+        transit_time(None, None)
+    assert transit_modes(None) == ["TRANSIT"]
+    assert transit_modes([PublicTransportMode.BUS]) == ["BUS"]

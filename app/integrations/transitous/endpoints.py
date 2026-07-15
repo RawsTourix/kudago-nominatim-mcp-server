@@ -37,6 +37,8 @@ async def plan_journey(
             "preTransitModes": "WALK",
             "postTransitModes": "WALK",
             "directModes": "",
+            "maxPreTransitTime": 900,
+            "maxPostTransitTime": 900,
             "detailedLegs": False,
             "detailedTransfers": False,
             "timetableView": True,

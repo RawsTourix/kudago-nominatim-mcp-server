@@ -65,7 +65,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Resolve a free-form location name with Nominatim and return coordinate candidates.
 
-        Use this when exact coordinates are required by another tool. If multiple candidates are returned, select one from user context or ask for clarification; do not silently combine candidates.
+        Use this when exact coordinates are required by another tool. If multiple candidates are returned, select one from user context or ask for clarification. After selecting one candidate, pass that candidate's latitude and longitude together to a routing tool. Do not combine latitude from one candidate with longitude from another candidate.
         """
         tool_name = "resolve_location"
         try:

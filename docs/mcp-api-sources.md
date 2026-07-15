@@ -1,13 +1,13 @@
 # MCP API sources
 
-Checked on 2026-07-13 against official provider documentation only.
+Checked on 2026-07-15 against official provider documentation only.
 
 | Provider | API/version | Operations | Checked |
 |---|---|---|---|
 | [KudaGo](https://docs.kudago.com/api/) | Public API v1.4 | events, places, movies, showings, news, lists, categories, locations | 2026-07-13 |
 | [Nominatim](https://nominatim.org/release-docs/latest/api/Search/) | Search API 5.3.2 | `/search` | 2026-07-13 |
-| [Transitous](https://transitous.org/api/) / [MOTIS](https://raw.githubusercontent.com/motis-project/motis/refs/tags/v2.10.2/openapi.yaml) | Stable MOTIS 2, OpenAPI tag v2.10.2 | `GET /api/v6/plan` | 2026-07-13 |
-| [OpenRouteService](https://giscience.github.io/openrouteservice/api-reference/endpoints/directions/requests-and-return-types) | Directions v2, backend docs 9.7.1 | `POST /v2/directions/{profile}/json` | 2026-07-13 |
+| [Transitous](https://transitous.org/api/) / [MOTIS](https://raw.githubusercontent.com/motis-project/motis/refs/tags/v2.10.2/openapi.yaml) | Stable MOTIS 2, OpenAPI tag v2.10.2 | `GET /api/v6/plan` | 2026-07-15 |
+| [OpenRouteService](https://giscience.github.io/openrouteservice/api-reference/endpoints/directions/requests-and-return-types) | Directions v2, backend docs 9.7.1 | `POST /v2/directions/{profile}/json` | 2026-07-15 |
 | [FastMCP](https://gofastmcp.com/servers/tools) | v3 | tools, schema metadata, annotations, version | 2026-07-13 |
 
 The Transitous production API page currently links its interactive docs to the
@@ -44,13 +44,14 @@ operation.
 | `item_id` | KudaGo object ID | maps to `object_id` | 1–100 characters |
 | `include_comments` | KudaGo comment endpoints | direct after applicability validation | only event/place/movie/news/guide |
 | `include_showings` | KudaGo movie showings | direct after applicability validation | only movie |
-| routing `origin`, `destination` | MOTIS `fromPlace`/`toPlace`; ORS `coordinates` | MOTIS uses `lat,lon`; ORS uses `[lon,lat]` through existing services | distinct nested coordinate points |
-| `departure_time` | MOTIS `time`, `arriveBy=false` | aware datetime plus flag | mutually exclusive with arrival time |
-| `arrival_time` | MOTIS `time`, `arriveBy=true` | aware datetime plus flag | mutually exclusive with departure time |
-| `modes` | MOTIS `transitModes` | lower-case agent enum to existing `TransitMode` | no raw `TRANSIT` or non-transit modes |
+| routing `origin`, `destination` | MOTIS `fromPlace`/`toPlace`; ORS `coordinates` | `RoutePoint` label stays agent-facing; MOTIS uses `lat,lon`; ORS uses `[lon,lat]` | distinct points; latitude and longitude must come from one selected candidate |
+| `departure_time` | MOTIS `time`, `arriveBy=false` | aware datetime plus flag | exactly one of departure or arrival time is required |
+| `arrival_time` | MOTIS `time`, `arriveBy=true` | aware datetime plus flag | exactly one of departure or arrival time is required |
+| `transport_modes` | MOTIS `transitModes` | lower-case agent enum to existing `TransitMode`; null maps to provider aggregate `TRANSIT` | no raw `TRANSIT` or non-transit modes; explicit list must be non-empty |
 | `max_transfers` | MOTIS `maxTransfers` | direct | 0–10 |
-| transit `limit` | MOTIS `numItineraries` | renamed | 1–5, default 3 |
-| street `mode` | ORS path profile | public enum to the application route enum; the existing service maps that to foot-walking/cycling-regular/driving-car | provider profile hidden |
+| `max_routes` | MOTIS `numItineraries` | renamed | 1–5, default 3 |
+| transit access/egress policy | MOTIS `preTransitModes`, `postTransitModes`, `directModes`, `maxPreTransitTime`, `maxPostTransitTime` | fixed to `WALK`, `WALK`, empty, 900, 900 | reported in the agent request summary; not caller-controlled |
+| street `travel_mode` | ORS path profile | public enum to the application route enum; the existing service maps that to foot-walking/cycling-regular/driving-car | provider profile hidden |
 
 Technical upstream fields such as tags, KudaGo language controls, `page_size`,
 raw timestamps, MOTIS search-window tuning and ORS geometry flags are not

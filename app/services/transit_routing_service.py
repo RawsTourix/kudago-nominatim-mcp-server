@@ -29,17 +29,42 @@ TRANSITOUS_ATTRIBUTION = [
     },
 ]
 
-DEFAULT_TRANSIT_MODES = (
-    TransitMode.TRAM,
-    TransitMode.SUBWAY,
-    TransitMode.FERRY,
-    TransitMode.BUS,
-    TransitMode.COACH,
-    TransitMode.RAIL,
-    TransitMode.FUNICULAR,
-    TransitMode.AERIAL_LIFT,
-)
-
+PROVIDER_MODE_NAMES = {
+    "WALK": "walking",
+    "BIKE": "cycling",
+    "RENTAL": "rental",
+    "CAR": "driving",
+    "CAR_PARKING": "car_parking",
+    "CAR_DROPOFF": "car_dropoff",
+    "ODM": "on_demand_transport",
+    "RIDE_SHARING": "ride_sharing",
+    "FLEX": "flexible_transport",
+    "TRANSIT": "transit",
+    "TRAM": "tram",
+    "SUBWAY": "subway",
+    "FERRY": "ferry",
+    "AIRPLANE": "airplane",
+    "BUS": "bus",
+    "COACH": "coach",
+    "RAIL": "rail",
+    "HIGHSPEED_RAIL": "high_speed_rail",
+    "LONG_DISTANCE": "long_distance_rail",
+    "NIGHT_RAIL": "night_rail",
+    "REGIONAL_FAST_RAIL": "regional_fast_rail",
+    "REGIONAL_RAIL": "regional_rail",
+    "SUBURBAN": "suburban_rail",
+    "FUNICULAR": "funicular",
+    "AERIAL_LIFT": "aerial_lift",
+    "OTHER": "other",
+    "AREAL_LIFT": "aerial_lift",
+    "METRO": "suburban_rail",
+    "CABLE_CAR": "cable_car",
+}
+DEBUG_PROVIDER_MODES = {
+    "DEBUG_BUS_ROUTE",
+    "DEBUG_RAILWAY_ROUTE",
+    "DEBUG_FERRY_ROUTE",
+}
 
 class TransitRoutingService:
     def __init__(
@@ -75,6 +100,11 @@ class TransitRoutingService:
             "num_itineraries": request.num_itineraries,
             "search_window_seconds": request.search_window_seconds,
             "language": request.language,
+            "pre_transit_modes": ["WALK"],
+            "post_transit_modes": ["WALK"],
+            "direct_modes": [],
+            "max_pre_transit_time": 900,
+            "max_post_transit_time": 900,
         }
         client = self.client or TransitousHttpClient(
             base_url=settings.transitous_base_url,
@@ -230,8 +260,8 @@ def _transit_query(
 
 def _effective_transit_modes(request: TransitRouteRequest) -> list[str]:
     requested = request.transit_modes
-    if requested is None or requested == [TransitMode.TRANSIT]:
-        return [mode.value for mode in DEFAULT_TRANSIT_MODES]
+    if requested is None:
+        return [TransitMode.TRANSIT.value]
     return [mode.value for mode in requested]
 
 
@@ -247,8 +277,20 @@ def _normalize_itinerary(itinerary: dict[str, Any]) -> dict[str, Any]:
         )
 
     legs = [_normalize_leg(leg) for leg in raw_legs]
+    mode_warnings = [
+        warning
+        for leg in legs
+        for warning in leg.pop("_mode_warnings")
+    ]
     warnings = _deduplicate_warnings(
-        warning for leg in legs for warning in _place_warnings_for_leg(leg)
+        [
+            *mode_warnings,
+            *(
+                warning
+                for leg in legs
+                for warning in _place_warnings_for_leg(leg)
+            ),
+        ]
     )
     return {
         "departure_time": _iso_time(itinerary.get("startTime")),
@@ -263,6 +305,7 @@ def _normalize_itinerary(itinerary: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_leg(leg: dict[str, Any]) -> dict[str, Any]:
+    mode, mode_warnings = normalize_provider_mode(leg.get("mode"))
     cancelled = _optional_bool(leg.get("cancelled"))
     if leg.get("tripCancelled") is True:
         cancelled = True
@@ -276,7 +319,8 @@ def _normalize_leg(leg: dict[str, Any]) -> dict[str, Any]:
             "Transitous intermediateStops must be an array of objects"
         )
     return {
-        "mode": _text(leg.get("mode")),
+        "mode": mode,
+        "_mode_warnings": mode_warnings,
         "from": _normalize_place(leg.get("from")),
         "to": _normalize_place(leg.get("to")),
         "intermediate_stops": [
@@ -298,6 +342,34 @@ def _normalize_leg(leg: dict[str, Any]) -> dict[str, Any]:
             leg.get("interlineWithPreviousLeg")
         ),
     }
+
+
+def normalize_provider_mode(
+    value: Any,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    if not isinstance(value, str):
+        return None, []
+
+    normalized = PROVIDER_MODE_NAMES.get(value)
+    if normalized is not None:
+        return normalized, []
+
+    lowered = value.lower()
+    if value in DEBUG_PROVIDER_MODES:
+        return lowered, [
+            {
+                "type": "provider_debug_mode",
+                "provider_mode": value,
+                "normalized_mode": lowered,
+            }
+        ]
+    return lowered, [
+        {
+            "type": "unknown_provider_mode",
+            "provider_mode": value,
+            "normalized_mode": lowered,
+        }
+    ]
 
 
 def _normalize_place(value: Any) -> dict[str, Any]:
