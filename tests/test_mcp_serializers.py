@@ -25,6 +25,16 @@ from app.mcp.serializers.routing import (
 )
 
 
+EXPECTED_ROUTING_COVERAGE_WARNING = {
+    "type": "coverage_notice",
+    "code": "regional_coverage_varies",
+    "message": (
+        "Routing is not supported in every region. Availability depends on "
+        "the provider and its underlying routing data."
+    ),
+}
+
+
 def output(payload):
     items = payload.get("items", payload.get("routes", []))
     return CommandOutput(
@@ -299,7 +309,10 @@ def test_street_route_serializer_preserves_labels_and_removes_geometry():
         },
         "routes": [{"geometry": "encoded", "segments": []}],
         "returned": 1,
-        "warnings": [],
+        "warnings": [
+            {"type": "provider_warning", "message": "Provider notice"},
+            deepcopy(EXPECTED_ROUTING_COVERAGE_WARNING),
+        ],
         "attribution": [],
     }
     request = PlanStreetRouteInput(
@@ -330,6 +343,10 @@ def test_street_route_serializer_preserves_labels_and_removes_geometry():
     assert data["request"]["travel_mode"] == "walking"
     assert "profile" not in data
     assert "query" not in data
+    assert data["warnings"] == [
+        {"type": "provider_warning", "message": "Provider notice"},
+        EXPECTED_ROUTING_COVERAGE_WARNING,
+    ]
 
     no_route = serialize_street_route(
         output({"status": "no_route", "routes": [], "returned": 0}),
@@ -345,6 +362,7 @@ def test_street_route_serializer_preserves_labels_and_removes_geometry():
             "coordinates for the selected travel mode."
         ),
     }
+    assert no_route["warnings"] == [EXPECTED_ROUTING_COVERAGE_WARNING]
     assert no_route["retry_hints"] == [
         {
             "code": "verify_route_points",
@@ -427,6 +445,7 @@ def test_public_transport_serializer_uses_original_agent_request():
         "direct_routes_enabled": False,
     }
     assert "query" not in data
+    assert data["warnings"] == [EXPECTED_ROUTING_COVERAGE_WARNING]
 
 
 def test_public_transport_no_route_has_cautious_conditional_diagnostics():
@@ -463,6 +482,7 @@ def test_public_transport_no_route_has_cautious_conditional_diagnostics():
     }
     assert data["request"]["transport_mode_policy"] == "all_provider_supported"
     assert data["request"]["transport_modes"] is None
+    assert data["warnings"] == [EXPECTED_ROUTING_COVERAGE_WARNING]
     assert [hint["code"] for hint in data["retry_hints"]] == [
         "verify_route_points",
         "try_nearby_time",

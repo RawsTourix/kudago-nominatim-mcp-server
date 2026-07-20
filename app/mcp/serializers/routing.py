@@ -30,6 +30,14 @@ REMOVED_ROUTE_FIELDS = {
     "nextPageCursor",
     "previousPageCursor",
 }
+ROUTING_COVERAGE_WARNING = {
+    "type": "coverage_notice",
+    "code": "regional_coverage_varies",
+    "message": (
+        "Routing is not supported in every region. Availability depends on "
+        "the provider and its underlying routing data."
+    ),
+}
 PUBLIC_TRANSPORT_RETRY_HINTS = [
     {
         "code": "verify_route_points",
@@ -120,7 +128,7 @@ def serialize_public_transport(
             ),
         }
         result["retry_hints"] = retry_hints
-    result["warnings"] = _list_value(payload.get("warnings"))
+    result["warnings"] = _routing_warnings(payload.get("warnings"))
     result["attribution"] = _list_value(payload.get("attribution"))
     return _limit_routes(result)
 
@@ -148,7 +156,7 @@ def serialize_street_route(
         },
         "returned": payload.get("returned", len(routes)),
         "routes": routes,
-        "warnings": _list_value(payload.get("warnings")),
+        "warnings": _routing_warnings(payload.get("warnings")),
         "attribution": _list_value(payload.get("attribution")),
     }
     if result_status == "no_route":
@@ -257,6 +265,13 @@ def _compact_nested(value: Any) -> Any:
 
 def _list_value(value: Any) -> list[Any]:
     return deepcopy(value) if isinstance(value, list) else []
+
+
+def _routing_warnings(value: Any) -> list[Any]:
+    warnings = _list_value(value)
+    if ROUTING_COVERAGE_WARNING not in warnings:
+        warnings.append(deepcopy(ROUTING_COVERAGE_WARNING))
+    return warnings
 
 
 __all__ = ["serialize_public_transport", "serialize_street_route"]

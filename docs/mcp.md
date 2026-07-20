@@ -149,6 +149,11 @@ restricts the search. Routing `no_route` responses include structured
 diagnostics and retry hints with both a stable code and agent-readable message.
 `plan_street_route` exposes `travel_mode`, not an ORS profile.
 
+Every completed result from either routing tool also contains a structured
+`data.warnings` entry with `code=regional_coverage_varies`. This warning is
+present for successful and `no_route` results because provider coverage is not
+available in every region.
+
 `plan_public_transport` publishes that time invariant as a structural JSON
 Schema `oneOf`. Clients therefore see the requirement for exactly one non-null
 `departure_time` or `arrival_time` in the machine-readable schema as well as in

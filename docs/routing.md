@@ -48,6 +48,12 @@ use `result_kind=street_route` and contain their original labeled points,
 travel mode, distance, duration, bbox, segments and instructions. Provider raw
 responses, MOTIS debug fields, cursors and geometry are absent from MCP data.
 
+Every completed routing result serialized by both tools includes a structured
+warning with `type=coverage_notice` and
+`code=regional_coverage_varies`. It tells the agent that routing is not
+supported in every region and depends on the provider's underlying routing
+data. Provider-specific warnings remain in the same `warnings` array.
+
 `route_verified` is true only when `result_status=ok` and at least one complete
 route is returned to the agent. Public-transport `no_route` produces
 `route_verified=false`, an empty route list and `coverage_status=unknown`. It
