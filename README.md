@@ -1,187 +1,258 @@
-# KudaGo Nominatim FastAPI + FastMCP Service
+<p align="center">
+  <strong>Русский</strong> · <a href="./README.en.md">English</a>
+</p>
 
-## Overview
+# KudaGo Nominatim: FastAPI + FastMCP сервис
 
-The service exposes one application command layer through two contracts:
+Асинхронный сервис для поиска событий, мест, фильмов, киносеансов, городских
+новостей и подборок KudaGo, разрешения географических названий через Nominatim
+и построения маршрутов через Transitous и OpenRouteService.
 
-- FastAPI REST under `/api/v1/*`; search commands are queued for an arq worker,
-  while reference and object GET endpoints remain synchronous and untracked;
-- an agent-facing FastMCP v2 facade over streamable HTTP at `/mcp` or stdio.
+Одна прикладная логика опубликована через два интерфейса:
 
-REST and MCP application commands share one queued execution lifecycle:
-PostgreSQL job → Redis → arq worker → `CommandExecutor`. REST returns the queued
-job immediately; MCP waits for the worker and returns an agent-facing result.
-See [docs/mcp.md](docs/mcp.md) for the tool catalog and response envelope.
+- REST API под `/api/v1`;
+- фасад FastMCP v2 для агентов через Streamable HTTP `/mcp` и stdio.
 
-> An arq worker is required to execute MCP tools as well as queued REST commands.
+> [!IMPORTANT]
+> Для REST-команд через очередь и всех MCP-инструментов нужен запущенный arq
+> worker.
+> API или MCP transport без worker смогут принять запрос, но не выполнят
+> application-команду.
 
-Асинхронный FastAPI-сервис для поиска событий, мест, фильмов, киносеансов,
-новостей и подборок KudaGo. Названия населённых пунктов сопоставляются со
-справочником KudaGo, а при необходимости разрешаются через Nominatim.
-Transitous предоставляет маршруты общественного транспорта, а
-OpenRouteService — маршруты пешком, на велосипеде и на автомобиле.
+> [!WARNING]
+> Маршрутизация поддерживается не во всех регионах. Каждый завершённый ответ
+> маршрутного MCP-инструмента содержит предупреждение
+> `regional_coverage_varies`. `no_route`
+> относится только к указанным точкам, времени и ограничениям и не доказывает,
+> что физического маршрута или транспорта вообще не существует.
 
-Длительные операции оформляются как jobs: API сохраняет задачу в PostgreSQL,
-помещает её в Redis, а отдельный arq worker выполняет внешние запросы и сохраняет
-результаты, события выполнения и диагностические данные.
+## Содержание
 
-## Features
+- [Возможности](#возможности)
+- [Архитектура](#архитектура)
+- [MCP-инструменты](#mcp-инструменты)
+- [Маршрутизация и покрытие](#маршрутизация-и-покрытие)
+- [Требования](#требования)
+- [Быстрый старт](#быстрый-старт)
+- [Подключение MCP-клиента](#подключение-mcp-клиента)
+- [Конфигурация](#конфигурация)
+- [REST API и жизненный цикл задач](#rest-api-и-жизненный-цикл-задач)
+- [Тестирование](#тестирование)
+- [Структура проекта](#структура-проекта)
+- [Документация](#документация)
+- [Ограничения и подготовка к промышленному развертыванию](#ограничения-и-подготовка-к-промышленному-развертыванию)
 
-- FastMCP transport over streamable HTTP and stdio;
-- ten self-contained agent tools with enums, field descriptions and compact results;
-- FastAPI HTTP API и автоматическая OpenAPI-документация;
-- PostgreSQL и асинхронный SQLAlchemy;
-- Redis и arq для фоновых задач;
-- интеграции с KudaGo, Nominatim, Transitous и OpenRouteService;
-- независимые public-transit и walking/cycling/driving routing commands;
-- кэширование результатов геокодирования;
-- история событий job и журнал внешних HTTP-вызовов;
-- компактное получение статуса и отдельная выдача полных результатов;
-- PowerShell smoke-test основных сценариев.
+## Возможности
 
-## Architecture
+| Область | Возможности | Источник |
+|---|---|---|
+| События и места | Поиск по городу, свободному названию или координатам; фильтры по датам и категориям | KudaGo + Nominatim |
+| Кино | Фильмы и реальные киносеансы | KudaGo |
+| Городской контент | Новости и редакционные подборки | KudaGo |
+| Геокодирование | Кандидаты координат для города, района, адреса или объекта | Nominatim |
+| Общественный транспорт | Маршруты, пересадки, остановки и расписание при наличии данных | Transitous / MOTIS 2 |
+| Пешком, велосипед, автомобиль | Независимые маршруты по дорожной сети | OpenRouteService |
+| Диагностика | Jobs, события выполнения, полные результаты и журнал upstream-вызовов | PostgreSQL |
 
-Единый поток application-команды:
+Ключевые свойства:
+
+- FastAPI с OpenAPI, Swagger UI и ReDoc;
+- фасад FastMCP 3.x версии 2 с описанными JSON Schema;
+- MCP-транспорты Streamable HTTP и stdio;
+- единый `CommandExecutor` для REST и MCP;
+- PostgreSQL, асинхронный SQLAlchemy, Redis и arq;
+- geo cache для повторного использования результатов Nominatim;
+- сохранение `job_events`, `command_results` и `upstream_calls`;
+- компактные agent-facing ответы с явными семантическими флагами;
+- отдельные модульные, интеграционные, сценарные и запускаемые вручную проверки
+  реальных провайдеров.
+
+## Архитектура
+
+REST-команды через очередь и MCP-инструменты используют один жизненный цикл:
 
 ```text
-REST ─┐
-      ├→ api_request → job → Redis → arq → CommandExecutor
-MCP ──┘
+REST-клиент ─┐
+             ├→ JobDispatchService → фиксация PostgreSQL → Redis → arq worker
+MCP-клиент ──┘                                                  │
+                                                                ▼
+                                                   CommandExecutor
+                                                                │
+                                                                ▼
+                                              сервис → внешний провайдер
+                                                                │
+                                                                ▼
+                                 результат + события + upstream-диагностика
 
-REST → queued response
-MCP  → await worker → MCP serializer → result
+REST → сразу возвращает ответ с job_id поставленной в очередь задачи
+MCP  → ждёт worker → читает сохранённый CommandOutput → сериализует ответ
 ```
+
+Задача фиксируется в PostgreSQL до постановки в Redis. Обработчик arq получает
+только `job_id`, загружает авторитетные команду и входные данные из базы,
+выполняет handler и сохраняет итог. Ошибка постановки в очередь не оставляет
+задачу навечно в `queued`: она переводится в `failed`.
+
+Справочники и детальные REST GET-запросы выполняются напрямую и не создают
+задач. MCP `get_details`, напротив, проходит через общий цикл с очередью.
 
 Подробнее: [docs/architecture.md](docs/architecture.md).
 
-## Project Structure
+## MCP-инструменты
+
+Полностью настроенный сервер публикует 10 инструментов только для чтения.
+Восемь доступны всегда, два маршрутных инструмента — только при наличии
+конфигурации провайдера.
+
+| MCP-инструмент | Назначение | Команда приложения | Публикация |
+|---|---|---|---|
+| `resolve_location` | Разрешить свободное название в кандидаты координат | `geo.resolve` | Всегда |
+| `find_events` | Найти события в календарном окне | `events.search` | Всегда |
+| `find_places` | Найти места и достопримечательности | `places.search` | Всегда |
+| `find_movies` | Найти фильмы | `movies.search` | Всегда |
+| `find_movie_showings` | Найти реальные киносеансы | `movie_showings.search` | Всегда |
+| `find_city_news` | Найти городские новости | `news.search` | Всегда |
+| `find_city_guides` | Найти редакционные подборки | `lists.search` | Всегда |
+| `get_details` | Получить полную карточку найденного объекта | `object.detail` | Всегда |
+| `plan_public_transport` | Построить маршрут общественного транспорта | `routing.transit.plan` | При непустом `TRANSITOUS_USER_AGENT` |
+| `plan_street_route` | Построить пеший, велосипедный или автомобильный маршрут | `routing.street.plan` | При непустом `OPENROUTESERVICE_API_KEY` |
+
+Старые имена MCP v1 (`events`, `places`, `object`, `transit_route`,
+`street_route` и другие) не являются псевдонимами.
+
+Все инструменты объявлены как доступные только для чтения, неразрушающие и
+идемпотентные. Публичные схемы содержат описания, перечисления (`enum`),
+числовые ограничения и межполевую валидацию. Ошибки аргументов возвращаются до
+создания job.
+
+В результатах для агента:
+
+- `schedule_verified=true` означает подтверждённое расписание событий или
+  киносеансов;
+- `showing_times_verified=false` у фильма напоминает, что для времени сеанса
+  нужен `find_movie_showings`;
+- `route_verified=true` выставляется только при `result_status=ok` и наличии
+  полного маршрута в MCP-ответе;
+- данные поиска и подборок ограничены 64 KiB;
+- детальные данные и маршруты ограничены 128 KiB;
+- при усечении удаляются целые items или варианты маршрута, а полный результат
+  остаётся в истории job.
+
+Полный контракт: [docs/mcp.md](docs/mcp.md).
+
+## Маршрутизация и покрытие
+
+Инструменты маршрутизации принимают координаты и не геокодируют текст
+самостоятельно:
 
 ```text
-app/
-  application/     shared command executor, contracts and handlers
-  api/             HTTP dependencies and routers
-  core/            configuration, PostgreSQL and Redis
-  integrations/    KudaGo, Nominatim and routing provider clients
-  mcp/             agent schemas, mappers, serializers, FastMCP server and tools
-  models/          SQLAlchemy models
-  repositories/    database access
-  schemas/         Pydantic request and response models
-  services/        application and integration logic
-  workers/         arq tasks and worker settings
-alembic/            database migrations
-docs/               architecture and API documentation
-scripts/            smoke tests
+resolve_location → выбрать один candidate → передать его latitude и longitude
 ```
 
-## Requirements
+`plan_public_transport` и `plan_street_route` независимы:
 
-- Python 3.11+;
-- Docker with Docker Compose;
-- PowerShell для запуска готового smoke-test.
+- Transitous отвечает только за общественный транспорт;
+- OpenRouteService отвечает только за walking/cycling/driving;
+- инструменты не вызывают друг друга;
+- автоматического резервного переключения между провайдерами нет.
 
-## Quick Start
+Условная публикация относится только к MCP-каталогу. REST-маршруты и команды
+приложения остаются зарегистрированными, но без настройки провайдера их
+выполнение завершится ошибкой конфигурации.
 
-Подготовьте окружение, инфраструктуру и базу данных:
+`plan_public_transport` требует ровно одно значение с часовым поясом:
+`departure_time` или `arrival_time`. Пеший доступ до и после участка
+общественного транспорта ограничен 900 секундами с каждой стороны.
+
+Каждый завершённый результат маршрутизации в MCP содержит:
+
+```json
+{
+  "type": "coverage_notice",
+  "code": "regional_coverage_varies",
+  "message": "Routing is not supported in every region. Availability depends on the provider and its underlying routing data."
+}
+```
+
+На live-тестах июля 2026 года Transitous не показал наблюдаемого покрытия
+Москвы и Московской области: для проверенных точек отсутствовали stops,
+stoptimes и itineraries, тогда как контрольный Берлин работал. Geoapify и
+Google Routes также не удовлетворили требованиям российского
+маршрутизации на общественном транспорте по России. Это снимок состояния
+провайдеров на дату теста, а не вечная гарантия.
+
+Подробности:
+
+- [routing-контракты](docs/routing.md);
+- [отчёт о live-тестах Transitous, Geoapify и Google Routes](docs/transit-provider-live-tests.md).
+
+## Требования
+
+- Python 3.11 или новее;
+- PostgreSQL 16;
+- Redis 7;
+- Docker Engine / Docker Desktop с Compose — для готовой локальной
+  инфраструктуры;
+- PowerShell — для готового `scripts/smoke_test.ps1`;
+- API key OpenRouteService — только если нужен `plan_street_route`;
+- корректный Transitous User-Agent с именем приложения, версией и контактом —
+  если нужен `plan_public_transport`.
+
+## Быстрый старт
+
+Команды ниже выполняются из корня репозитория.
+
+### 1. Подготовить окружение
 
 ```powershell
 Copy-Item .env.example .env
 python -m pip install -e .
-docker compose up -d
-alembic upgrade head
-uvicorn app.main:app --reload --port 8011
 ```
 
-В отдельном терминале запустите worker:
+Перед запуском измените в `.env` как минимум:
 
-```powershell
-arq app.workers.worker_settings.WorkerSettings
-```
+- `POSTGRES_PASSWORD`;
+- `NOMINATIM_USER_AGENT`, чтобы он идентифицировал ваше приложение;
+- контакт в `TRANSITOUS_USER_AGENT`;
+- `OPENROUTESERVICE_API_KEY`, если нужна маршрутизация OpenRouteService.
 
-После запуска выполните smoke-test:
+Не коммитьте `.env` с реальными паролями и API keys.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1
-```
-
-## Environment Variables
-
-Создайте локальный файл окружения:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Основные настройки:
-
-| Variable | Purpose |
-|---|---|
-| `COMMAND_JOB_TIMEOUT_SECONDS` | internal command-execution budget; 120 seconds by default |
-| `ARQ_JOB_TIMEOUT_SECONDS` | arq hard timeout; must exceed the command budget by at least 5 seconds; 135 seconds by default |
-| `DATABASE_URL` | asyncpg URL подключения к PostgreSQL |
-| `REDIS_URL` | Redis database для arq |
-| `MCP_JOB_WAIT_TIMEOUT_SECONDS` | максимальное ожидание worker для MCP-вызова; по умолчанию 180 секунд |
-| `KUDAGO_BASE_URL` | базовый URL KudaGo API |
-| `KUDAGO_LANG` | язык запросов KudaGo |
-| `KUDAGO_USER_AGENT` | User-Agent клиента KudaGo |
-| `NOMINATIM_USER_AGENT` | обязательный User-Agent Nominatim |
-| `NOMINATIM_MIN_INTERVAL_SECONDS` | минимальный интервал между запросами |
-| `NOMINATIM_COUNTRYCODES` | ограничение поиска по странам |
-| `DEFAULT_RADIUS` | радиус геопоиска по умолчанию, метры |
-| `TRANSITOUS_BASE_URL` | базовый URL Transitous / MOTIS 2 |
-| `TRANSITOUS_USER_AGENT` | имя приложения, версия и контакт; без значения transit MCP tool не публикуется |
-| `TRANSITOUS_TIMEOUT_SECONDS` | timeout Transitous routing |
-| `OPENROUTESERVICE_BASE_URL` | базовый URL OpenRouteService |
-| `OPENROUTESERVICE_API_KEY` | API key; без значения street-route MCP tool не публикуется |
-| `OPENROUTESERVICE_USER_AGENT` | User-Agent OpenRouteService; по умолчанию `kudago-nominatim-service/0.1.0` |
-| `OPENROUTESERVICE_TIMEOUT_SECONDS` | timeout OpenRouteService directions |
-
-Не коммитьте `.env` с реальными учётными данными.
-
-## Docker Services
-
-`docker-compose.yml` поднимает инфраструктуру:
-
-- PostgreSQL 16;
-- Redis 7.
-
-API и worker в текущем MVP запускаются локально, а не в контейнерах.
+### 2. Запустить PostgreSQL и Redis
 
 ```powershell
 docker compose up -d
 docker compose ps
 ```
 
-Порт PostgreSQL задаётся через `POSTGRES_PORT`; Redis доступен на `6379`.
+Compose поднимает только инфраструктуру. API и worker в текущей конфигурации
+запускаются локально.
 
-## Running Locally
+После копирования `.env.example` PostgreSQL доступен на `127.0.0.1:5433`, Redis
+— на `127.0.0.1:6379`.
 
-Установите проект:
-
-```powershell
-python -m pip install -e .
-```
-
-Запустите инфраструктуру и примените миграции:
+### 3. Применить миграции
 
 ```powershell
-docker compose up -d
-alembic upgrade head
+python -m alembic upgrade head
 ```
 
-Запустите API:
+### 4. Запустить API
 
 ```powershell
-uvicorn app.main:app --reload --port 8011
+python -m uvicorn app.main:app --reload --port 8011
 ```
 
-Документация будет доступна по адресам:
+Доступные адреса:
 
-```text
-http://127.0.0.1:8011/docs
-http://127.0.0.1:8011/redoc
-```
+| Назначение | URL |
+|---|---|
+| REST API | `http://127.0.0.1:8011/api/v1` |
+| Swagger UI | `http://127.0.0.1:8011/docs` |
+| ReDoc | `http://127.0.0.1:8011/redoc` |
+| FastMCP Streamable HTTP | `http://127.0.0.1:8011/mcp` |
 
-## Running Worker
+### 5. Запустить обработчик arq
 
 В отдельном терминале:
 
@@ -189,82 +260,193 @@ http://127.0.0.1:8011/redoc
 arq app.workers.worker_settings.WorkerSettings
 ```
 
-API, MCP transport и worker должны использовать одинаковые `DATABASE_URL` и
-`REDIS_URL`. Worker обязателен для queued REST endpoints и всех MCP tools.
+API, MCP-процесс и обработчик arq должны использовать одинаковые
+`DATABASE_URL` и `REDIS_URL`.
 
-## Database Migrations
-
-Применить миграции:
+### 6. Проверить сервис
 
 ```powershell
-alembic upgrade head
+Invoke-RestMethod http://127.0.0.1:8011/api/v1/health
+Invoke-RestMethod http://127.0.0.1:8011/api/v1/health/db
 ```
 
-Создать миграцию после изменения моделей:
+## Подключение MCP-клиента
+
+### Streamable HTTP
+
+При запущенных API и worker укажите клиенту:
+
+```text
+http://127.0.0.1:8011/mcp
+```
+
+### Stdio
+
+Отдельный stdio-транспорт запускается так:
 
 ```powershell
-alembic revision --autogenerate -m "describe change"
+python -m app.mcp
 ```
 
-## API Endpoints
+Эквивалентный совместимый entrypoint:
 
-Основные команды:
+```powershell
+python mcp_server.py
+```
 
-| Method | Endpoint | Purpose |
+Обобщённый пример конфигурации MCP-клиента:
+
+```json
+{
+  "mcpServers": {
+    "kudago-nominatim": {
+      "command": "python",
+      "args": ["-m", "app.mcp"],
+      "cwd": "C:\\absolute\\path\\to\\kudago-nominatim-integrate-mcp"
+    }
+  }
+}
+```
+
+Формат конфигурации зависит от конкретного клиента. Stdio-сервер сам
+подключается к Redis, но application-команды по-прежнему выполняет отдельный
+arq worker.
+
+## Конфигурация
+
+Настройки загружаются из переменных окружения и локального `.env`.
+
+### Приложение и инфраструктура
+
+| Переменная | Назначение | Значение в `.env.example` |
 |---|---|---|
-| `POST` | `/api/v1/geo/resolve` | геокодирование названия |
-| `POST` | `/api/v1/events/search` | поиск событий |
-| `POST` | `/api/v1/places/search` | поиск мест |
-| `POST` | `/api/v1/movies/search` | поиск фильмов |
-| `POST` | `/api/v1/movie-showings/search` | поиск киносеансов |
-| `POST` | `/api/v1/news/search` | поиск новостей |
-| `POST` | `/api/v1/lists/search` | поиск подборок |
-| `POST` | `/api/v1/routing/transit` | общественный транспорт через Transitous |
-| `POST` | `/api/v1/routing/street` | пешком, велосипед или автомобиль через OpenRouteService |
-| `GET` | `/api/v1/objects/{type}/{id}` | полная карточка объекта |
-| `GET` | `/api/v1/references/*` | справочники KudaGo |
+| `APP_NAME` | Имя FastAPI-приложения | `KudaGo Nominatim FastAPI Service` |
+| `DEBUG` | Debug-режим | `0` |
+| `DATABASE_ECHO` | Журналирование SQL-запросов; для stdio принудительно отключается | `0` |
+| `DATABASE_URL` | Asyncpg URL PostgreSQL | PostgreSQL на `127.0.0.1:5433` |
+| `REDIS_URL` | Redis для arq и MCP | `redis://127.0.0.1:6379/0` |
+| `COMMAND_JOB_TIMEOUT_SECONDS` | Внутренний бюджет application-команды | `120` |
+| `ARQ_JOB_TIMEOUT_SECONDS` | Жёсткий лимит arq; минимум на 5 секунд больше лимита команды | `135` |
+| `MCP_JOB_WAIT_TIMEOUT_SECONDS` | Максимальное ожидание worker внутри MCP-вызова | `180` |
+| `POSTGRES_USER` | Пользователь PostgreSQL в Compose | `kudago` |
+| `POSTGRES_PASSWORD` | Пароль PostgreSQL в Compose | `change-me` |
+| `POSTGRES_DB` | База PostgreSQL в Compose | `kudago_service` |
+| `POSTGRES_PORT` | Порт PostgreSQL на host | `5433` |
 
-Полная таблица: [docs/api.md](docs/api.md).
+### Внешние провайдеры
 
-Маршрутизация принимает только координаты. Если известен адрес или название,
-сначала используйте `resolve_location`, затем передайте выбранные координаты в
-`plan_public_transport` либо `plan_street_route`. Подробные контракты и ограничения описаны
-в [docs/routing.md](docs/routing.md).
+| Переменная | Назначение |
+|---|---|
+| `KUDAGO_BASE_URL` | Базовый URL KudaGo API v1.4 |
+| `KUDAGO_LANG` | Язык KudaGo-запросов |
+| `KUDAGO_USER_AGENT` | User-Agent клиента KudaGo |
+| `NOMINATIM_USER_AGENT` | Обязательный идентифицирующий User-Agent Nominatim |
+| `NOMINATIM_MIN_INTERVAL_SECONDS` | Минимальный интервал между Nominatim-запросами |
+| `NOMINATIM_COUNTRYCODES` | Ограничение геокодирования по странам; по умолчанию `ru` |
+| `DEFAULT_RADIUS` | Радиус geo search по умолчанию, метры |
+| `TRANSITOUS_BASE_URL` | Базовый URL Transitous / MOTIS 2 |
+| `TRANSITOUS_USER_AGENT` | Имя приложения, версия и контакт; управляет публикацией transit MCP tool |
+| `TRANSITOUS_TIMEOUT_SECONDS` | Тайм-аут Transitous |
+| `OPENROUTESERVICE_BASE_URL` | Базовый URL OpenRouteService |
+| `OPENROUTESERVICE_API_KEY` | API key; управляет публикацией street-route MCP tool |
+| `OPENROUTESERVICE_USER_AGENT` | User-Agent OpenRouteService |
+| `OPENROUTESERVICE_TIMEOUT_SECONDS` | Тайм-аут OpenRouteService |
 
-## Jobs Lifecycle
+Точные defaults находятся в [.env.example](.env.example) и
+[app/core/config.py](app/core/config.py).
 
-Фоновый endpoint сразу возвращает `job_id`. Проверить состояние:
+## REST API и жизненный цикл задач
+
+### Команды через очередь
+
+Все основные POST-команды создают job и возвращают `job_id` и
+`queue_job_id`.
+
+| Метод | Endpoint | Назначение |
+|---|---|---|
+| `POST` | `/api/v1/geo/resolve` | Геокодирование |
+| `POST` | `/api/v1/events/search` | События |
+| `POST` | `/api/v1/places/search` | Места |
+| `POST` | `/api/v1/movies/search` | Фильмы |
+| `POST` | `/api/v1/movie-showings/search` | Киносеансы |
+| `POST` | `/api/v1/news/search` | Новости |
+| `POST` | `/api/v1/lists/search` | Подборки |
+| `POST` | `/api/v1/routing/transit` | Общественный транспорт |
+| `POST` | `/api/v1/routing/street` | Пешком, велосипед или автомобиль |
+
+Маршрутные endpoints принимают только координаты. Адрес или название сначала
+разрешите через `/geo/resolve` или MCP `resolve_location`.
+
+### Прямые GET-запросы
+
+| Метод | Endpoint | Назначение |
+|---|---|---|
+| `GET` | `/api/v1/health` | Состояние API |
+| `GET` | `/api/v1/health/db` | Проверка PostgreSQL |
+| `GET` | `/api/v1/references/event-categories` | Категории событий |
+| `GET` | `/api/v1/references/place-categories` | Категории мест |
+| `GET` | `/api/v1/references/locations` | Города KudaGo |
+| `GET` | `/api/v1/references/locations/{slug}` | Карточка города |
+| `GET` | `/api/v1/objects/{type}/{id}` | Детальная карточка объекта |
+
+### Задачи и диагностика
+
+Состояния задачи: `queued`, `running`, `succeeded`, `failed`.
 
 ```text
 GET /api/v1/jobs/{job_id}
-```
-
-Стандартные состояния: `queued`, `running`, `succeeded`, `failed`.
-
-По умолчанию массив `items` скрывается из ответа job. Полные данные доступны:
-
-```text
-GET /api/v1/jobs/{job_id}/results
 GET /api/v1/jobs/{job_id}?include_result=true
-```
-
-Диагностика:
-
-```text
 GET /api/v1/jobs/{job_id}/events
+GET /api/v1/jobs/{job_id}/results
 GET /api/v1/jobs/{job_id}/upstream-calls
 ```
 
-## Smoke Test
+Обычный `GET /jobs/{job_id}` скрывает большие `items` и `routes`. Полные данные
+доступны через `/results` или `include_result=true`.
 
-Перед тестом должны работать PostgreSQL, Redis, API и arq worker.
+Успешно выполненная задача может содержать доменный результат `geo_ambiguous`,
+`geo_not_found`, `geo_unsupported` или `no_route`. Это не ошибка транспорта.
+
+Точные схемы запросов и ответов: [docs/api.md](docs/api.md) и Swagger UI
+`/docs`.
+
+## Тестирование
+
+Установить dev dependencies:
+
+```powershell
+python -m pip install -e ".[dev]"
+```
+
+### Модульные и интеграционные тесты
+
+```powershell
+python -m pytest -q
+```
+
+Тесты проверяют обработчики приложения, клиенты провайдеров, жизненный цикл
+очереди, MCP-каталог и схемы, межполевую валидацию, сериализаторы, ограничения
+размера ответа, условную публикацию маршрутных инструментов и зафиксированный
+снимок справочников.
+
+### Проверка REST-сценариев
+
+После запуска PostgreSQL, Redis, API и worker:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1
 ```
 
-Run the MCP checks after PostgreSQL and Redis are available, migrations are
-applied, and the arq worker is running:
+Другой API URL:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1 `
+  -BaseUrl "http://127.0.0.1:8011/api/v1"
+```
+
+### Проверки MCP
+
+При запущенных PostgreSQL, Redis и worker:
 
 ```powershell
 python scripts/test_mcp_inmemory.py
@@ -273,35 +455,96 @@ python scripts/test_mcp_http.py
 python scripts/dump_mcp_schemas.py
 ```
 
-The HTTP check expects the FastAPI application to be running. To launch only
-the stdio MCP transport for an MCP client, use:
+HTTP-проверка дополнительно требует запущенный Uvicorn.
+
+### Проверка маршрутизации с реальными провайдерами
 
 ```powershell
-python -m app.mcp
+python scripts/test_routing_live.py
 ```
 
-Другой адрес API можно передать параметром:
+Этот тест обращается к реальным провайдерам, требует корректный
+`TRANSITOUS_USER_AGENT` и использует `OPENROUTESERVICE_API_KEY`, если он задан.
+Он не входит в обычный pytest.
+
+Отдельные provider-диагностики и необходимые переменные окружения описаны в
+[отчёте о live-тестах](docs/transit-provider-live-tests.md).
+
+## Разработка
+
+Применить миграции:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1 `
-  -BaseUrl "http://127.0.0.1:8011/api/v1"
+python -m alembic upgrade head
 ```
 
-## Known Issues
+Создать ревизию миграции:
 
-- KudaGo `/places/` с `has_showings=movie` может завершаться по `ReadTimeout`
-  даже с ограниченным временным диапазоном. Для киносеансов используйте
-  `/api/v1/movie-showings/search`.
-- Надёжность и полнота данных зависят от внешних KudaGo и Nominatim API.
-- Transitous работает best-effort и не гарантирует покрытие или realtime-данные
-  для каждого региона. `no_route` не доказывает отсутствие транспорта вообще.
-- Debug endpoint `/jobs/{id}/upstream-calls` возвращает сохранённые upstream
-  payloads без отдельной авторизации; перед публичным развёртыванием его нужно
-  защитить или отключить.
+```powershell
+python -m alembic revision --autogenerate -m "описание изменения"
+```
 
-## Roadmap
+Обновить зафиксированный в git снимок справочников MCP:
 
-- автоматические unit и integration tests;
-- аутентификация и ограничение debug endpoints;
-- контейнеризация API и worker;
-- retry/backoff и метрики внешних запросов.
+```powershell
+python scripts/update_mcp_reference_data.py
+```
+
+Проверить и сохранить реальные MCP schemas:
+
+```powershell
+python scripts/dump_mcp_schemas.py
+```
+
+## Структура проекта
+
+```text
+app/
+  api/             FastAPI routers и зависимости
+  application/     общие контракты команд, executor и обработчики
+  core/            settings, PostgreSQL и Redis
+  integrations/    HTTP-клиенты внешних провайдеров
+  mcp/             схемы, преобразователи, сериализаторы, server и tools
+  models/          модели SQLAlchemy
+  repositories/    операции с PostgreSQL
+  schemas/         контракты Pydantic для REST и прикладного слоя
+  services/        бизнес-правила и оркестрация провайдеров
+  workers/         задачи arq и WorkerSettings
+alembic/            миграции PostgreSQL
+docs/               подробная документация
+scripts/            сценарные проверки, выгрузка схем и live-диагностика
+tests/              модульные и интеграционные тесты
+docker-compose.yml  PostgreSQL и Redis для локальной разработки
+```
+
+## Документация
+
+| Документ | Содержание |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Компоненты, цикл очереди, хранение данных и модель ошибок |
+| [docs/api.md](docs/api.md) | REST endpoints и примеры данных |
+| [docs/mcp.md](docs/mcp.md) | MCP-фасад v2, каталог, схемы и envelopes |
+| [docs/routing.md](docs/routing.md) | Контракты маршрутов общественного транспорта и дорожной сети |
+| [docs/testing.md](docs/testing.md) | Модульные, интеграционные, MCP- и live-проверки |
+| [docs/mcp-schema-design.md](docs/mcp-schema-design.md) | Принципы схем для агентов |
+| [docs/mcp-api-sources.md](docs/mcp-api-sources.md) | Источники перечислений и справочных данных |
+| [docs/transit-provider-live-tests.md](docs/transit-provider-live-tests.md) | Сравнение покрытия Transitous, Geoapify и Google Routes |
+
+## Ограничения и подготовка к промышленному развертыванию
+
+- Входящие REST, MCP и диагностические endpoints не имеют аутентификации на
+  уровне приложения. Не публикуйте сервис в интернет без внешнего слоя
+  аутентификации.
+- `/api/v1/jobs/{job_id}/upstream-calls` возвращает сохранённые request/response
+  payloads провайдеров. Ограничьте к нему доступ или отключите его в публичном
+  окружении.
+- Полнота и доступность данных зависят от KudaGo, Nominatim, Transitous и
+  OpenRouteService.
+- Transitous и OpenRouteService не гарантируют покрытие каждого региона.
+- `no_route` не является доказательством отсутствия физического маршрута.
+- MCP timeout не отменяет queued job: она может завершиться позднее и остаться
+  доступной через REST job endpoints.
+- Кэшированный geo result закономерно не создаёт новый upstream-call.
+- Docker Compose не контейнеризирует API и обработчик arq; он запускает только
+  PostgreSQL и Redis.
+- Храните `.env`, реквизиты базы данных и API keys провайдеров вне git.
