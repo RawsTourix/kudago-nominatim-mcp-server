@@ -206,7 +206,6 @@ Google Routes также не удовлетворили требованиям 
 
 ```powershell
 Copy-Item .env.example .env
-python -m pip install -e .
 ```
 
 Перед запуском измените в `.env` как минимум:
@@ -218,32 +217,30 @@ python -m pip install -e .
 
 Не коммитьте `.env` с реальными паролями и API keys.
 
-### 2. Запустить PostgreSQL и Redis
+### 2. Запустить весь стек
 
 ```powershell
-docker compose up -d
-docker compose ps
+docker compose up --build -d
+docker compose ps --all
 ```
 
-Compose поднимает только инфраструктуру. API и worker в текущей конфигурации
-запускаются локально.
+Одна команда собирает приложение, применяет Alembic-миграции и запускает:
 
-После копирования `.env.example` PostgreSQL доступен на `127.0.0.1:5433`, Redis
-— на `127.0.0.1:6379`.
+- PostgreSQL;
+- Redis с AOF persistence;
+- FastAPI + FastMCP (`app.main:app`);
+- обработчик arq;
+- Nginx gateway на единственном публичном HTTP-порту.
 
-### 3. Применить миграции
+PostgreSQL и Redis по умолчанию доступны только сервисам во внутренней
+Compose-сети, поэтому не конфликтуют с локальными экземплярами.
 
-```powershell
-python -m alembic upgrade head
-```
+Стандартный запуск автоматически использует `docker-compose.override.yml`:
+исходники подключены как bind mount, Uvicorn перезапускается при изменениях
+в `app/`, а arq следит за тем же каталогом. Устанавливать Python локально для
+запуска стека не нужно.
 
-### 4. Запустить API
-
-```powershell
-python -m uvicorn app.main:app --reload --port 8011
-```
-
-Доступные адреса:
+После запуска доступны:
 
 | Назначение | URL |
 |---|---|
@@ -252,23 +249,28 @@ python -m uvicorn app.main:app --reload --port 8011
 | ReDoc | `http://127.0.0.1:8011/redoc` |
 | FastMCP Streamable HTTP | `http://127.0.0.1:8011/mcp` |
 
-### 5. Запустить обработчик arq
-
-В отдельном терминале:
-
-```powershell
-arq app.workers.worker_settings.WorkerSettings
-```
-
-API, MCP-процесс и обработчик arq должны использовать одинаковые
-`DATABASE_URL` и `REDIS_URL`.
-
-### 6. Проверить сервис
+### 3. Проверить сервис
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8011/api/v1/health
 Invoke-RestMethod http://127.0.0.1:8011/api/v1/health/db
+Invoke-RestMethod http://127.0.0.1:8011/api/v1/health/ready
 ```
+
+Production-like запуск без bind mounts и autoreload:
+
+```powershell
+docker compose -f docker-compose.yml up --build -d
+```
+
+Масштабирование API и worker не меняет внешний URL:
+
+```powershell
+docker compose up -d --scale app=3 --scale worker=4
+```
+
+Подробности об обновлениях кода, зависимостей, переменных окружения и миграций
+см. в [руководстве по Docker](docs/docker.md).
 
 ## Подключение MCP-клиента
 
@@ -323,15 +325,20 @@ arq worker.
 | `APP_NAME` | Имя FastAPI-приложения | `KudaGo Nominatim FastAPI Service` |
 | `DEBUG` | Debug-режим | `0` |
 | `DATABASE_ECHO` | Журналирование SQL-запросов; для stdio принудительно отключается | `0` |
+| `APP_BIND_ADDRESS` | Host-интерфейс HTTP gateway | `127.0.0.1` |
+| `APP_PORT` | Порт HTTP gateway на host | `8011` |
+| `UVICORN_WORKERS` | Uvicorn-процессы в одном production-like контейнере | `1` |
 | `DATABASE_URL` | Asyncpg URL PostgreSQL | PostgreSQL на `127.0.0.1:5433` |
 | `REDIS_URL` | Redis для arq и MCP | `redis://127.0.0.1:6379/0` |
 | `COMMAND_JOB_TIMEOUT_SECONDS` | Внутренний бюджет application-команды | `120` |
 | `ARQ_JOB_TIMEOUT_SECONDS` | Жёсткий лимит arq; минимум на 5 секунд больше лимита команды | `135` |
+| `ARQ_MAX_JOBS` | Максимум одновременно выполняемых задач на один worker-контейнер | `10` |
 | `MCP_JOB_WAIT_TIMEOUT_SECONDS` | Максимальное ожидание worker внутри MCP-вызова | `180` |
 | `POSTGRES_USER` | Пользователь PostgreSQL в Compose | `kudago` |
 | `POSTGRES_PASSWORD` | Пароль PostgreSQL в Compose | `change-me` |
 | `POSTGRES_DB` | База PostgreSQL в Compose | `kudago_service` |
-| `POSTGRES_PORT` | Порт PostgreSQL на host | `5433` |
+| `POSTGRES_PORT` | Порт PostgreSQL при подключении opt-in host-конфигурации | `5433` |
+| `REDIS_PORT` | Порт Redis при подключении opt-in host-конфигурации | `6379` |
 
 ### Внешние провайдеры
 
@@ -472,15 +479,24 @@ python scripts/test_routing_live.py
 
 ## Разработка
 
-Применить миграции:
+После добавления новой ревизии применить миграции в уже запущенном Compose:
 
 ```powershell
-python -m alembic upgrade head
+docker compose run --rm migrate
 ```
 
-Создать ревизию миграции:
+Изменения Python-кода подхватываются dev-контейнерами автоматически. После
+изменения `pyproject.toml` пересоберите Python-сервисы:
 
 ```powershell
+docker compose up --build -d app worker
+```
+
+Для локальной разработки вне Docker установите пакет с dev-зависимостями.
+Создать ревизию миграции можно локально:
+
+```powershell
+python -m pip install -e ".[dev]"
 python -m alembic revision --autogenerate -m "описание изменения"
 ```
 
@@ -514,7 +530,11 @@ alembic/            миграции PostgreSQL
 docs/               подробная документация
 scripts/            сценарные проверки, выгрузка схем и live-диагностика
 tests/              модульные и интеграционные тесты
-docker-compose.yml  PostgreSQL и Redis для локальной разработки
+docker/              конфигурация HTTP gateway
+Dockerfile           образ FastAPI/FastMCP, worker и миграций
+docker-compose.yml  production-like описание полного стека
+docker-compose.override.yml  autoreload для локальной разработки
+docker-compose.host.yml  opt-in публикация PostgreSQL и Redis на host
 ```
 
 ## Документация
@@ -524,6 +544,7 @@ docker-compose.yml  PostgreSQL и Redis для локальной разрабо
 | [docs/architecture.md](docs/architecture.md) | Компоненты, цикл очереди, хранение данных и модель ошибок |
 | [docs/api.md](docs/api.md) | REST endpoints и примеры данных |
 | [docs/mcp.md](docs/mcp.md) | MCP-фасад v2, каталог, схемы и envelopes |
+| [docs/docker.md](docs/docker.md) | Compose-стек, обновления и масштабирование |
 | [docs/routing.md](docs/routing.md) | Контракты маршрутов общественного транспорта и дорожной сети |
 | [docs/testing.md](docs/testing.md) | Модульные, интеграционные, MCP- и live-проверки |
 | [docs/mcp-schema-design.md](docs/mcp-schema-design.md) | Принципы схем для агентов |

@@ -1,0 +1,10 @@
+# Opt-in host access for local database clients and host-side test runs.
+# Combine this file explicitly with the base and development override files.
+services:
+  postgres:
+    ports:
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
+
+  redis:
+    ports:
+      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"

@@ -14,6 +14,6 @@ class WorkerSettings:
 
     redis_settings = get_redis_settings()
 
-    max_jobs = 10
+    max_jobs = settings.arq_max_jobs
     job_timeout = settings.arq_job_timeout_seconds
     keep_result = 3600

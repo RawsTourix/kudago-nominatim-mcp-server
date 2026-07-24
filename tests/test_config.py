@@ -19,6 +19,7 @@ def test_routing_user_agents_do_not_break_existing_environment(monkeypatch):
     assert config.mcp_job_wait_timeout_seconds == 180.0
     assert config.command_job_timeout_seconds == 120.0
     assert config.arq_job_timeout_seconds == 135.0
+    assert config.arq_max_jobs == 10
 
 
 @pytest.mark.parametrize("arq_timeout", [120.0, 124.999])

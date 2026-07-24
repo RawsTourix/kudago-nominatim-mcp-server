@@ -201,7 +201,6 @@ Run the following commands from the repository root.
 
 ```powershell
 Copy-Item .env.example .env
-python -m pip install -e .
 ```
 
 Before starting the service, update at least:
@@ -213,32 +212,30 @@ Before starting the service, update at least:
 
 Do not commit `.env` files containing real passwords or API keys.
 
-### 2. Start PostgreSQL and Redis
+### 2. Start the complete stack
 
 ```powershell
-docker compose up -d
-docker compose ps
+docker compose up --build -d
+docker compose ps --all
 ```
 
-Compose starts infrastructure only. The API and worker run locally in the
-current setup.
+One command builds the application, applies the Alembic migrations, and starts:
 
-After copying `.env.example`, PostgreSQL is available at `127.0.0.1:5433` and
-Redis at `127.0.0.1:6379`.
+- PostgreSQL;
+- Redis with AOF persistence;
+- FastAPI + FastMCP (`app.main:app`);
+- the arq worker;
+- an Nginx gateway on the single public HTTP port.
 
-### 3. Apply migrations
+PostgreSQL and Redis are available only on the internal Compose network by
+default, so they do not conflict with host-side instances.
 
-```powershell
-python -m alembic upgrade head
-```
+The default command automatically loads `docker-compose.override.yml`: the
+source tree is bind-mounted, Uvicorn reloads after changes under `app/`, and
+arq watches the same directory. A local Python installation is not required
+to run the stack.
 
-### 4. Start the API
-
-```powershell
-python -m uvicorn app.main:app --reload --port 8011
-```
-
-Available URLs:
+The following URLs are then available:
 
 | Purpose | URL |
 |---|---|
@@ -247,23 +244,28 @@ Available URLs:
 | ReDoc | `http://127.0.0.1:8011/redoc` |
 | FastMCP Streamable HTTP | `http://127.0.0.1:8011/mcp` |
 
-### 5. Start the worker
-
-In a separate terminal:
-
-```powershell
-arq app.workers.worker_settings.WorkerSettings
-```
-
-The API, MCP process, and worker must use the same `DATABASE_URL` and
-`REDIS_URL`.
-
-### 6. Check the service
+### 3. Check the service
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8011/api/v1/health
 Invoke-RestMethod http://127.0.0.1:8011/api/v1/health/db
+Invoke-RestMethod http://127.0.0.1:8011/api/v1/health/ready
 ```
+
+For a production-like run without bind mounts or autoreload:
+
+```powershell
+docker compose -f docker-compose.yml up --build -d
+```
+
+Scale the API and worker without changing the public URL:
+
+```powershell
+docker compose up -d --scale app=3 --scale worker=4
+```
+
+See the [Docker guide](docs/docker.md) for code, dependency, environment, and
+migration update workflows.
 
 ## Connecting an MCP client
 
@@ -318,15 +320,20 @@ Settings are loaded from environment variables and the local `.env` file.
 | `APP_NAME` | FastAPI application name | `KudaGo Nominatim FastAPI Service` |
 | `DEBUG` | Debug mode | `0` |
 | `DATABASE_ECHO` | SQLAlchemy query logging; forcibly disabled for stdio | `0` |
+| `APP_BIND_ADDRESS` | HTTP gateway host interface | `127.0.0.1` |
+| `APP_PORT` | HTTP gateway host port | `8011` |
+| `UVICORN_WORKERS` | Uvicorn processes per production-like container | `1` |
 | `DATABASE_URL` | PostgreSQL asyncpg URL | PostgreSQL at `127.0.0.1:5433` |
 | `REDIS_URL` | Redis connection for arq and MCP | `redis://127.0.0.1:6379/0` |
 | `COMMAND_JOB_TIMEOUT_SECONDS` | Internal application-command budget | `120` |
 | `ARQ_JOB_TIMEOUT_SECONDS` | arq hard timeout; at least 5 seconds above the command timeout | `135` |
+| `ARQ_MAX_JOBS` | Maximum concurrent jobs per worker container | `10` |
 | `MCP_JOB_WAIT_TIMEOUT_SECONDS` | Maximum worker wait inside an MCP call | `180` |
 | `POSTGRES_USER` | PostgreSQL user in Compose | `kudago` |
 | `POSTGRES_PASSWORD` | PostgreSQL password in Compose | `change-me` |
 | `POSTGRES_DB` | PostgreSQL database in Compose | `kudago_service` |
-| `POSTGRES_PORT` | PostgreSQL host port | `5433` |
+| `POSTGRES_PORT` | PostgreSQL port with the opt-in host configuration | `5433` |
+| `REDIS_PORT` | Redis port with the opt-in host configuration | `6379` |
 
 ### External providers
 
@@ -467,15 +474,24 @@ documented in the
 
 ## Development
 
-Apply migrations:
+Apply a new revision to an already running Compose stack:
 
 ```powershell
-python -m alembic upgrade head
+docker compose run --rm migrate
 ```
 
-Create a migration revision:
+Python source changes are picked up automatically by the development
+containers. Rebuild the Python services after changing `pyproject.toml`:
 
 ```powershell
+docker compose up --build -d app worker
+```
+
+For development outside Docker, install the package with its development
+dependencies. A revision can then be created locally:
+
+```powershell
+python -m pip install -e ".[dev]"
 python -m alembic revision --autogenerate -m "describe change"
 ```
 
@@ -509,7 +525,11 @@ alembic/            PostgreSQL migrations
 docs/               detailed documentation
 scripts/            smoke, schema, and live-diagnostic scripts
 tests/              unit and integration tests
-docker-compose.yml  PostgreSQL and Redis for local development
+docker/              HTTP gateway configuration
+Dockerfile           FastAPI/FastMCP, worker, and migration image
+docker-compose.yml  production-like complete-stack definition
+docker-compose.override.yml  local-development autoreload
+docker-compose.host.yml  opt-in PostgreSQL and Redis host ports
 ```
 
 ## Documentation
@@ -519,6 +539,7 @@ docker-compose.yml  PostgreSQL and Redis for local development
 | [docs/architecture.md](docs/architecture.md) | Components, queued lifecycle, persistence, and failure model |
 | [docs/api.md](docs/api.md) | REST endpoints and payload examples |
 | [docs/mcp.md](docs/mcp.md) | MCP facade v2, catalog, schemas, and envelopes |
+| [docs/docker.md](docs/docker.md) | Compose stack, updates, and scaling |
 | [docs/routing.md](docs/routing.md) | Transit and street-routing contracts |
 | [docs/testing.md](docs/testing.md) | Unit, smoke, MCP, and live checks |
 | [docs/mcp-schema-design.md](docs/mcp-schema-design.md) | Agent-facing schema principles |

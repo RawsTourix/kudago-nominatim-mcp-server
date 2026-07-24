@@ -8,9 +8,12 @@ REST/worker smoke test, an in-memory MCP call, and real stdio/HTTP transports.
 ```powershell
 Copy-Item .env.example .env
 python -m pip install -e ".[dev]"
-docker compose up -d
-python -m alembic upgrade head
+docker compose up --build -d
 ```
+
+Compose starts PostgreSQL, Redis, the migrated database, the API, and the arq
+worker. The local editable installation is only needed for running pytest and
+the diagnostic scripts from the host.
 
 ## 1. Unit tests
 
@@ -37,14 +40,10 @@ has no description.
 
 ## 2. REST and worker regression
 
-Start the API and worker in separate terminals:
+The Compose stack already runs the API and worker. Confirm they are healthy:
 
 ```powershell
-python -m uvicorn app.main:app --reload --port 8011
-```
-
-```powershell
-arq app.workers.worker_settings.WorkerSettings
+docker compose ps --all
 ```
 
 Run the existing smoke test:
